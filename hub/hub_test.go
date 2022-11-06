@@ -30,7 +30,9 @@ func TestMemoHub(t *testing.T) {
 
 			for v = range subCh {
 				if idx%2 == 0 && v == dataMax/2 {
-					hub.UnSubscribe(topic, sub)
+					if err := hub.UnSubscribe(topic, sub); err != nil {
+						t.Error(err)
+					}
 				}
 				t.Log(sub, v)
 			}
@@ -51,9 +53,9 @@ func TestMemoHub(t *testing.T) {
 
 	hub.Stop()
 
-	hub.Join()
+	t.Log("topics after hub stop:", hub.Topics())
 
-	t.Log("topics after hub close:", hub.Topics())
+	hub.Join()
 
 	wg.Wait()
 

@@ -245,7 +245,7 @@ func (hub *MemoHub[T]) PipelineUpStream(src Hub[T], topics ...string) error {
 	}
 
 	for _, topic := range topics {
-		pipeline := func() {
+		pipeline := func(topic string) {
 			defer hub.Stop()
 
 			for v := range src.Subscribe(topic, hub) {
@@ -253,7 +253,7 @@ func (hub *MemoHub[T]) PipelineUpStream(src Hub[T], topics ...string) error {
 			}
 		}
 
-		go pipeline()
+		go pipeline(topic)
 	}
 
 	return nil
