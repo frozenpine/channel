@@ -1,22 +1,13 @@
-package channel
+package hub
 
 import (
 	"context"
-	"errors"
 	"log"
 	"sync"
 	"time"
 )
 
-var (
-	ErrNoSubcriber = errors.New("no subscriber")
-	ErrHubClosed   = errors.New("hub closed")
-	ErrPubTimeout  = errors.New("pub timeout")
-
-	defaultChanLen = 10
-)
-
-type Hub[T any] struct {
+type MemoHub[T any] struct {
 	init    sync.Once
 	release sync.Once
 
@@ -25,25 +16,18 @@ type Hub[T any] struct {
 
 	chanLen int
 
+	topicList []string
+
 	subCache sync.Map
 	subWg    sync.WaitGroup
 
 	pubCache sync.Map
+
+	pipelineCache sync.Map
 }
 
-// NewHub create channel hub.
-//
-// bufSize: pub & sub chan buffer size, if bufSize < 0, use default size 10
-func NewHub[T any](ctx context.Context, bufSize int) *Hub[T] {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	if bufSize < 0 {
-		bufSize = defaultChanLen
-	}
-
-	hub := Hub[T]{
+func NewMemoHub[T any](ctx context.Context, bufSize int) *MemoHub[T] {
+	hub := MemoHub[T]{
 		chanLen: bufSize,
 	}
 
@@ -54,7 +38,7 @@ func NewHub[T any](ctx context.Context, bufSize int) *Hub[T] {
 	return &hub
 }
 
-func (hub *Hub[T]) Stop() {
+func (hub *MemoHub[T]) Stop() {
 	hub.release.Do(func() {
 		hub.cancelFn()
 
@@ -70,16 +54,16 @@ func (hub *Hub[T]) Stop() {
 	})
 }
 
-func (hub *Hub[T]) Join() {
+func (hub *MemoHub[T]) Join() {
 	<-hub.runCtx.Done()
 
 	hub.subWg.Wait()
 }
 
-func (hub *Hub[T]) dispatcher(topic string, pubCh <-chan T) {
-	hub.subWg.Add(1)
-
+func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
 	defer hub.subWg.Done()
+
+	var pubFinished bool
 
 	for {
 		topicSub, exist := hub.subCache.Load(topic)
@@ -92,6 +76,10 @@ func (hub *Hub[T]) dispatcher(topic string, pubCh <-chan T) {
 
 		select {
 		case <-hub.runCtx.Done():
+			if !pubFinished {
+				continue
+			}
+
 			subCache.Range(func(subcriber, subCh any) bool {
 				ch := subCh.(chan T)
 
@@ -102,7 +90,12 @@ func (hub *Hub[T]) dispatcher(topic string, pubCh <-chan T) {
 			})
 
 			return
-		case v := <-pubCh:
+		case v, ok := <-pubCh:
+			if !ok {
+				pubFinished = true
+				continue
+			}
+
 			subCache.Range(func(subcriber, subCh any) bool {
 				ch := subCh.(chan T)
 
@@ -118,7 +111,7 @@ func (hub *Hub[T]) dispatcher(topic string, pubCh <-chan T) {
 	}
 }
 
-func (hub *Hub[T]) Subscribe(topic string, subscriber interface{}) <-chan T {
+func (hub *MemoHub[T]) Subscribe(topic string, subscriber interface{}) <-chan T {
 	topicSub, _ := hub.subCache.LoadOrStore(topic, &sync.Map{})
 	subCache := topicSub.(*sync.Map)
 
@@ -135,7 +128,7 @@ func (hub *Hub[T]) Subscribe(topic string, subscriber interface{}) <-chan T {
 	return ch.(chan T)
 }
 
-func (hub *Hub[T]) loadOrCreatePub(topic string) chan<- T {
+func (hub *MemoHub[T]) loadOrCreatePub(topic string) chan<- T {
 	if _, exist := hub.subCache.Load(topic); !exist {
 		return nil
 	}
@@ -144,13 +137,14 @@ func (hub *Hub[T]) loadOrCreatePub(topic string) chan<- T {
 	pubCh := topicPub.(chan T)
 
 	if !pubExist {
+		hub.subWg.Add(1)
 		go hub.dispatcher(topic, pubCh)
 	}
 
 	return pubCh
 }
 
-func (hub *Hub[T]) timeout(timeout time.Duration) <-chan time.Time {
+func (hub *MemoHub[T]) timeout(timeout time.Duration) <-chan time.Time {
 	if timeout > 0 {
 		return time.After(timeout)
 	}
@@ -158,7 +152,7 @@ func (hub *Hub[T]) timeout(timeout time.Duration) <-chan time.Time {
 	return make(<-chan time.Time)
 }
 
-func (hub *Hub[T]) Publish(topic string, v T, timeout time.Duration) error {
+func (hub *MemoHub[T]) Publish(topic string, v T, timeout time.Duration) error {
 	pubCh := hub.loadOrCreatePub(topic)
 	if pubCh == nil {
 		return ErrNoSubcriber
@@ -172,4 +166,30 @@ func (hub *Hub[T]) Publish(topic string, v T, timeout time.Duration) error {
 	case pubCh <- v:
 		return nil
 	}
+}
+
+func (hub *MemoHub[T]) Topics() []string {
+	return hub.topicList
+}
+
+func (hub *MemoHub[T]) Pipeline(dst Hub[T], topics ...string) (Hub[T], error) {
+	if dst == nil {
+		dst = NewMemoHub[T](context.Background(), hub.chanLen)
+	}
+
+	for _, topic := range topics {
+		pipeline := func() {
+			defer dst.Stop()
+
+			for v := range hub.Subscribe(topic, hub) {
+				dst.Publish(topic, v, -1)
+			}
+		}
+
+		go pipeline()
+
+		hub.pipelineCache.Store(pipeline, dst)
+	}
+
+	return dst, nil
 }
