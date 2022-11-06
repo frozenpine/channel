@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+var dummyData = struct{}{}
+
 type MemoHub[T any] struct {
 	init    sync.Once
 	release sync.Once
@@ -16,14 +18,12 @@ type MemoHub[T any] struct {
 
 	chanLen int
 
-	topicList []string
+	topicList sync.Map
 
 	subCache sync.Map
 	subWg    sync.WaitGroup
 
 	pubCache sync.Map
-
-	pipelineCache sync.Map
 }
 
 func NewMemoHub[T any](ctx context.Context, bufSize int) *MemoHub[T] {
@@ -97,6 +97,8 @@ func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
 				return true
 			})
 
+			hub.topicList.Delete(topic)
+
 			return
 		case v, ok := <-pubCh:
 			if !ok {
@@ -136,8 +138,37 @@ func (hub *MemoHub[T]) Subscribe(topic string, subscriber interface{}) <-chan T 
 	return ch.(chan T)
 }
 
+func (hub *MemoHub[T]) UnSubscribe(topic string, subscriber interface{}) error {
+	topicSub, topicExist := hub.subCache.Load(topic)
+	if !topicExist {
+		return ErrNoTopic
+	}
+	subCache := topicSub.(*sync.Map)
+
+	ch, subExist := subCache.LoadAndDelete(subscriber)
+
+	subCount := 0
+	subCache.Range(func(key, value any) bool {
+		subCount++
+		return true
+	})
+
+	if subCount <= 0 {
+		hub.topicList.Delete(topic)
+	}
+
+	if !subExist {
+		return ErrNoSubcriber
+	}
+
+	close(ch.(chan T))
+
+	return nil
+}
+
 func (hub *MemoHub[T]) loadOrCreatePub(topic string) chan<- T {
 	if _, exist := hub.subCache.Load(topic); !exist {
+		hub.topicList.Delete(topic)
 		return nil
 	}
 
@@ -146,6 +177,7 @@ func (hub *MemoHub[T]) loadOrCreatePub(topic string) chan<- T {
 
 	if !pubExist {
 		hub.subWg.Add(1)
+		hub.topicList.LoadOrStore(topic, dummyData)
 		go hub.dispatcher(topic, pubCh)
 	}
 
@@ -177,16 +209,23 @@ func (hub *MemoHub[T]) Publish(topic string, v T, timeout time.Duration) error {
 }
 
 func (hub *MemoHub[T]) Topics() []string {
-	return hub.topicList
+	topics := []string{}
+
+	hub.topicList.Range(func(topic, _s any) bool {
+		topics = append(topics, topic.(string))
+		return true
+	})
+
+	return topics
 }
 
-func (hub *MemoHub[T]) Pipeline(dst Hub[T], topics ...string) (Hub[T], error) {
+func (hub *MemoHub[T]) PipelineDownStream(dst Hub[T], topics ...string) (Hub[T], error) {
 	if dst == nil {
 		dst = NewMemoHub[T](context.Background(), hub.chanLen)
 	}
 
 	for _, topic := range topics {
-		pipeline := func() {
+		pipeline := func(topic string) {
 			defer dst.Stop()
 
 			for v := range hub.Subscribe(topic, hub) {
@@ -194,10 +233,28 @@ func (hub *MemoHub[T]) Pipeline(dst Hub[T], topics ...string) (Hub[T], error) {
 			}
 		}
 
-		go pipeline()
-
-		hub.pipelineCache.Store(pipeline, dst)
+		go pipeline(topic)
 	}
 
 	return dst, nil
+}
+
+func (hub *MemoHub[T]) PipelineUpStream(src Hub[T], topics ...string) error {
+	if src == nil {
+		return ErrPipeline
+	}
+
+	for _, topic := range topics {
+		pipeline := func() {
+			defer hub.Stop()
+
+			for v := range src.Subscribe(topic, hub) {
+				hub.Publish(topic, v, -1)
+			}
+		}
+
+		go pipeline()
+	}
+
+	return nil
 }

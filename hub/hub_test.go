@@ -20,21 +20,27 @@ func TestMemoHub(t *testing.T) {
 	for idx := 0; idx < subCount; idx++ {
 		sub := fmt.Sprintf("%s%d", "sub", idx)
 
-		go func() {
+		go func(idx int) {
 			defer wg.Done()
 
 			var v int
 
-			for v = range hub.Subscribe(topic, sub) {
+			subCh := hub.Subscribe(topic, sub)
+			t.Logf("topics after %s sub: %+v", sub, hub.Topics())
+
+			for v = range subCh {
+				if idx%2 == 0 && v == dataMax/2 {
+					hub.UnSubscribe(topic, sub)
+				}
 				t.Log(sub, v)
 			}
 
-			if v != dataMax {
+			if idx%2 != 0 && v != dataMax {
 				t.Errorf("%s channel has unread value", sub)
 			}
 
 			t.Logf("%s channel closed", sub)
-		}()
+		}(idx)
 	}
 
 	for idx := 0; idx <= dataMax; idx++ {
@@ -47,5 +53,9 @@ func TestMemoHub(t *testing.T) {
 
 	hub.Join()
 
+	t.Log("topics after hub close:", hub.Topics())
+
 	wg.Wait()
+
+	t.Log("topics after sub quit:", hub.Topics())
 }
