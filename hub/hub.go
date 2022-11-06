@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const defaultChanSize = 1
+
 var (
 	ErrNoSubcriber = errors.New("no subscriber")
 	ErrHubClosed   = errors.New("hub closed")
@@ -27,5 +29,6 @@ type Hub[T any] interface {
 
 	Subscribe(topic string, subscribe interface{}) <-chan T
 	Publish(topic string, v T, timeout time.Duration) error
+
 	Pipeline(dst Hub[T], topics ...string) (Hub[T], error)
 }

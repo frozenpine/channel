@@ -60,6 +60,14 @@ func (hub *MemoHub[T]) Join() {
 	hub.subWg.Wait()
 }
 
+func (hub *MemoHub[T]) makeChan() chan T {
+	if hub.chanLen >= 0 {
+		return make(chan T, hub.chanLen)
+	}
+
+	return make(chan T, defaultChanSize)
+}
+
 func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
 	defer hub.subWg.Done()
 
@@ -115,7 +123,7 @@ func (hub *MemoHub[T]) Subscribe(topic string, subscriber interface{}) <-chan T 
 	topicSub, _ := hub.subCache.LoadOrStore(topic, &sync.Map{})
 	subCache := topicSub.(*sync.Map)
 
-	ch, subExist := subCache.LoadOrStore(subscriber, make(chan T, 1))
+	ch, subExist := subCache.LoadOrStore(subscriber, hub.makeChan())
 
 	if subExist {
 		log.Printf("Channel on topic[%s] exist for subscriber[%v]", topic, subscriber)
@@ -133,7 +141,7 @@ func (hub *MemoHub[T]) loadOrCreatePub(topic string) chan<- T {
 		return nil
 	}
 
-	topicPub, pubExist := hub.pubCache.LoadOrStore(topic, make(chan T, 1))
+	topicPub, pubExist := hub.pubCache.LoadOrStore(topic, hub.makeChan())
 	pubCh := topicPub.(chan T)
 
 	if !pubExist {

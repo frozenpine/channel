@@ -6,12 +6,10 @@ import (
 	"github.com/frozenpine/channel/hub"
 )
 
-const defaultHubLen = 10
-
 // NewHub create channel hub.
 //
-// bufSize: pub & sub chan buffer size, if bufSize < 0, use default size 10
-func NewHub[T any](ctx context.Context, bufSize int) hub.Hub[T] {
+// chanSize: pub & sub chan buffer size, if chanSize < 0, use hub default size
+func NewHub[T any](ctx context.Context, chanSize int) hub.Hub[T] {
 	var (
 		result  hub.Hub[T]
 		typ     hub.HubType
@@ -28,13 +26,9 @@ func NewHub[T any](ctx context.Context, bufSize int) hub.Hub[T] {
 		}
 	}
 
-	if bufSize < 0 {
-		bufSize = defaultHubLen
-	}
-
 	switch typ {
 	case hub.MemoHubType:
-		result = hub.NewMemoHub[T](ctx, bufSize)
+		result = hub.NewMemoHub[T](ctx, chanSize)
 	}
 
 	return result
