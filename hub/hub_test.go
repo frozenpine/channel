@@ -10,7 +10,7 @@ import (
 func TestMemoHub(t *testing.T) {
 	topic := "test"
 
-	hub := NewMemoHub[int](context.TODO(), -1)
+	hub := NewMemoHub[int](context.TODO(), "", -1)
 
 	dataMax := 99
 	subCount := 2
@@ -18,30 +18,30 @@ func TestMemoHub(t *testing.T) {
 	wg.Add(subCount)
 
 	for idx := 0; idx < subCount; idx++ {
-		sub := fmt.Sprintf("%s%d", "sub", idx)
+		subName := fmt.Sprintf("%s%d", "sub", idx)
 
 		go func(idx int) {
 			defer wg.Done()
 
 			var v int
 
-			subCh := hub.Subscribe(topic, sub)
-			t.Logf("topics after %s sub: %+v", sub, hub.Topics())
+			subID, subCh := hub.Subscribe(topic, subName, Quick)
+			t.Logf("topics after %s sub: %+v", subName, hub.Topics())
 
 			for v = range subCh {
 				if idx%2 == 0 && v == dataMax/2 {
-					if err := hub.UnSubscribe(topic, sub); err != nil {
+					if err := hub.UnSubscribe(topic, subID); err != nil {
 						t.Error(err)
 					}
 				}
-				t.Log(sub, v)
+				t.Log(subName, subID, v)
 			}
 
 			if idx%2 != 0 && v != dataMax {
-				t.Errorf("%s channel has unread value", sub)
+				t.Errorf("%s channel has unread value", subName)
 			}
 
-			t.Logf("%s channel closed", sub)
+			t.Logf("%s channel closed", subName)
 		}(idx)
 	}
 

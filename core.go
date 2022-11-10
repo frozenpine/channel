@@ -9,7 +9,7 @@ import (
 // NewHub create channel hub.
 //
 // chanSize: pub & sub chan buffer size, if chanSize < 0, use hub default size
-func NewHub[T any](ctx context.Context, chanSize int) hub.Hub[T] {
+func NewHub[T any](ctx context.Context, name string, chanSize int) hub.Hub[T] {
 	var (
 		result  hub.Hub[T]
 		typ     hub.HubType
@@ -28,7 +28,7 @@ func NewHub[T any](ctx context.Context, chanSize int) hub.Hub[T] {
 
 	switch typ {
 	case hub.MemoHubType:
-		result = hub.NewMemoHub[T](ctx, chanSize)
+		result = hub.NewMemoHub[T](ctx, "", chanSize)
 	}
 
 	return result

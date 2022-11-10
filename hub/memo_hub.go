@@ -3,13 +3,21 @@ package hub
 import (
 	"context"
 	"log"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/gofrs/uuid"
 )
 
-var dummyData = struct{}{}
+var (
+	upstreamIdtSep = "."
+
+	cache = sync.Pool{New: func() any { return &sync.Map{} }}
+)
 
 type MemoHub[T any] struct {
+	id      uuid.UUID
 	init    sync.Once
 	release sync.Once
 
@@ -18,17 +26,18 @@ type MemoHub[T any] struct {
 
 	chanLen int
 
-	topicList sync.Map
-
 	subCache sync.Map
 	subWg    sync.WaitGroup
 
 	pubCache sync.Map
+
+	upstreamCache sync.Map
 }
 
-func NewMemoHub[T any](ctx context.Context, bufSize int) *MemoHub[T] {
+func NewMemoHub[T any](ctx context.Context, name string, bufSize int) *MemoHub[T] {
 	hub := MemoHub[T]{
 		chanLen: bufSize,
+		id:      GenID(name),
 	}
 
 	hub.init.Do(func() {
@@ -38,19 +47,69 @@ func NewMemoHub[T any](ctx context.Context, bufSize int) *MemoHub[T] {
 	return &hub
 }
 
+func (hub *MemoHub[T]) ID() uuid.UUID {
+	return hub.id
+}
+
+func (hub *MemoHub[T]) Name() string {
+	return hub.id.String()
+}
+
 func (hub *MemoHub[T]) Stop() {
 	hub.release.Do(func() {
+		hub.disconnectUpstream()
+
 		hub.cancelFn()
 
-		hub.pubCache.Range(func(topic, topicPub any) bool {
-			pubCh := topicPub.(chan T)
+		hub.closePubs()
+	})
+}
 
-			log.Printf("Closing pub channel for topic: %s", topic.(string))
-
-			close(pubCh)
-
+func (hub *MemoHub[T]) disconnectUpstream() {
+	hub.upstreamCache.Range(func(key, value any) bool {
+		upstreamIdentity, ok := key.(string)
+		if !ok {
+			log.Printf("Invalid upstream identity: %v", key)
 			return true
-		})
+		}
+
+		src, ok := value.(Hub[T])
+		if !ok {
+			log.Printf("Invalid upstream source: %v, %v", upstreamIdentity, value)
+			return true
+		}
+
+		idtList := strings.Split(upstreamIdentity, upstreamIdtSep)
+		if len(idtList) < 3 {
+			log.Printf("Invalid upstream identity: %v", upstreamIdentity)
+			return true
+		}
+
+		lastIdx := len(idtList) - 1
+		srcName := idtList[0]
+		topic := strings.Join(idtList[1:lastIdx], upstreamIdtSep)
+		subID, _ := uuid.FromString(idtList[lastIdx])
+
+		if srcName != src.Name() {
+			log.Printf("Parsed upstream name[%s] mismatch with source: %s", srcName, src.ID())
+		}
+		if err := src.UnSubscribe(topic, subID); err != nil {
+			log.Printf("UnSubscribe from upstream[%s] failed: %v", src.ID(), err)
+		}
+
+		return true
+	})
+}
+
+func (hub *MemoHub[T]) closePubs() {
+	hub.pubCache.Range(func(topic, topicPub any) bool {
+		pubCh := topicPub.(chan T)
+
+		log.Printf("Closing pub channel for topic: %s", topic.(string))
+
+		close(pubCh)
+
+		return true
 	})
 }
 
@@ -80,7 +139,7 @@ func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
 			continue
 		}
 
-		subCache := topicSub.(*sync.Map)
+		subscribers := topicSub.(*sync.Map)
 
 		select {
 		case <-hub.runCtx.Done():
@@ -88,7 +147,7 @@ func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
 				continue
 			}
 
-			subCache.Range(func(subcriber, subCh any) bool {
+			subscribers.Range(func(subcriber, subCh any) bool {
 				ch := subCh.(chan T)
 
 				log.Printf("Closing sub channel for subscriber[%+v] on topic[%s].", subcriber, topic)
@@ -97,7 +156,7 @@ func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
 				return true
 			})
 
-			hub.topicList.Delete(topic)
+			hub.subCache.Delete(topic)
 
 			return
 		case v, ok := <-pubCh:
@@ -106,7 +165,7 @@ func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
 				continue
 			}
 
-			subCache.Range(func(subcriber, subCh any) bool {
+			subscribers.Range(func(subcriber, subCh any) bool {
 				ch := subCh.(chan T)
 
 				select {
@@ -121,11 +180,13 @@ func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
 	}
 }
 
-func (hub *MemoHub[T]) Subscribe(topic string, subscriber interface{}) <-chan T {
-	topicSub, _ := hub.subCache.LoadOrStore(topic, &sync.Map{})
+func (hub *MemoHub[T]) Subscribe(topic string, subscriber string, resumeType ResumeType) (uuid.UUID, <-chan T) {
+	topicSub, _ := hub.subCache.LoadOrStore(topic, cache.Get())
 	subCache := topicSub.(*sync.Map)
 
-	ch, subExist := subCache.LoadOrStore(subscriber, hub.makeChan())
+	subID := GenID(subscriber)
+
+	subChan, subExist := subCache.LoadOrStore(subID, hub.makeChan())
 
 	if subExist {
 		log.Printf("Channel on topic[%s] exist for subscriber[%v]", topic, subscriber)
@@ -135,53 +196,51 @@ func (hub *MemoHub[T]) Subscribe(topic string, subscriber interface{}) <-chan T 
 
 	hub.loadOrCreatePub(topic)
 
-	return ch.(chan T)
+	return subID, subChan.(chan T)
 }
 
-func (hub *MemoHub[T]) UnSubscribe(topic string, subscriber interface{}) error {
+func (hub *MemoHub[T]) UnSubscribe(topic string, subID uuid.UUID) error {
 	topicSub, topicExist := hub.subCache.Load(topic)
 	if !topicExist {
 		return ErrNoTopic
 	}
-	subCache := topicSub.(*sync.Map)
+	subscribers := topicSub.(*sync.Map)
 
-	ch, subExist := subCache.LoadAndDelete(subscriber)
+	subChan, subExist := subscribers.LoadAndDelete(subID)
 
 	subCount := 0
-	subCache.Range(func(key, value any) bool {
+	subscribers.Range(func(key, value any) bool {
 		subCount++
 		return true
 	})
 
 	if subCount <= 0 {
-		hub.topicList.Delete(topic)
+		hub.subCache.Delete(topic)
 	}
 
 	if !subExist {
 		return ErrNoSubcriber
 	}
 
-	close(ch.(chan T))
+	close(subChan.(chan T))
 
 	return nil
 }
 
 func (hub *MemoHub[T]) loadOrCreatePub(topic string) chan<- T {
 	if _, exist := hub.subCache.Load(topic); !exist {
-		hub.topicList.Delete(topic)
 		return nil
 	}
 
 	topicPub, pubExist := hub.pubCache.LoadOrStore(topic, hub.makeChan())
-	pubCh := topicPub.(chan T)
+	pubChan := topicPub.(chan T)
 
 	if !pubExist {
 		hub.subWg.Add(1)
-		hub.topicList.LoadOrStore(topic, dummyData)
-		go hub.dispatcher(topic, pubCh)
+		go hub.dispatcher(topic, pubChan)
 	}
 
-	return pubCh
+	return pubChan
 }
 
 func (hub *MemoHub[T]) timeout(timeout time.Duration) <-chan time.Time {
@@ -211,7 +270,7 @@ func (hub *MemoHub[T]) Publish(topic string, v T, timeout time.Duration) error {
 func (hub *MemoHub[T]) Topics() []string {
 	topics := []string{}
 
-	hub.topicList.Range(func(topic, _s any) bool {
+	hub.subCache.Range(func(topic, _ any) bool {
 		topics = append(topics, topic.(string))
 		return true
 	})
@@ -221,22 +280,16 @@ func (hub *MemoHub[T]) Topics() []string {
 
 func (hub *MemoHub[T]) PipelineDownStream(dst Hub[T], topics ...string) (Hub[T], error) {
 	if dst == nil {
-		dst = NewMemoHub[T](context.Background(), hub.chanLen)
+		dst = NewMemoHub[T](context.Background(), "", hub.chanLen)
 	}
 
-	for _, topic := range topics {
-		pipeline := func(topic string) {
-			defer dst.Stop()
-
-			for v := range hub.Subscribe(topic, hub) {
-				dst.Publish(topic, v, -1)
-			}
-		}
-
-		go pipeline(topic)
-	}
+	dst.PipelineUpStream(hub, topics...)
 
 	return dst, nil
+}
+
+func (hub *MemoHub[T]) makeUpstreamIdentity(src Hub[T], topic string, subID uuid.UUID) string {
+	return strings.Join([]string{src.Name(), topic, subID.String()}, upstreamIdtSep)
 }
 
 func (hub *MemoHub[T]) PipelineUpStream(src Hub[T], topics ...string) error {
@@ -248,7 +301,16 @@ func (hub *MemoHub[T]) PipelineUpStream(src Hub[T], topics ...string) error {
 		pipeline := func(topic string) {
 			defer hub.Stop()
 
-			for v := range src.Subscribe(topic, hub) {
+			subID, subChan := src.Subscribe(topic, hub.id.String(), Quick)
+			upstreamIdt := hub.makeUpstreamIdentity(src, topic, subID)
+
+			_, exist := hub.upstreamCache.LoadOrStore(upstreamIdt, src)
+			if exist {
+				log.Printf("Already connected to upstream[%s]@%s", src.ID(), topic)
+				return
+			}
+
+			for v := range subChan {
 				hub.Publish(topic, v, -1)
 			}
 		}
