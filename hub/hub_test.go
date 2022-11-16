@@ -51,7 +51,7 @@ func TestMemoHub(t *testing.T) {
 		}
 	}
 
-	hub.Stop()
+	hub.Release()
 
 	t.Log("topics after hub stop:", hub.Topics())
 

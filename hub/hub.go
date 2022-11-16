@@ -31,6 +31,7 @@ type HubType uint
 
 const (
 	MemoHubType HubType = iota
+	RemoteHubType
 )
 
 type ResumeType uint8
@@ -41,17 +42,25 @@ const (
 	Quick
 )
 
+type Consumer[T any] interface {
+	Subscribe(topic string, subscriber string, resumeType ResumeType) (uuid.UUID, <-chan T)
+	UnSubscribe(topic string, subID uuid.UUID) error
+}
+
+type Producer[T any] interface {
+	Publish(topic string, v T, timeout time.Duration) error
+}
+
 type Hub[T any] interface {
 	ID() uuid.UUID
 	Name() string
-	Stop()
+	Release()
 	Join()
 
 	Topics() []string
 
-	Subscribe(topic string, subscriber string, resumeType ResumeType) (uuid.UUID, <-chan T)
-	UnSubscribe(topic string, subID uuid.UUID) error
-	Publish(topic string, v T, timeout time.Duration) error
+	Consumer[T]
+	Producer[T]
 
 	PipelineDownStream(dst Hub[T], topics ...string) (Hub[T], error)
 	PipelineUpStream(src Hub[T], topics ...string) error

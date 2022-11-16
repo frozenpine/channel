@@ -17,9 +17,9 @@ var (
 )
 
 type MemoHub[T any] struct {
-	id      uuid.UUID
-	init    sync.Once
-	release sync.Once
+	id          uuid.UUID
+	initOnce    sync.Once
+	releaseOnce sync.Once
 
 	runCtx   context.Context
 	cancelFn context.CancelFunc
@@ -35,12 +35,16 @@ type MemoHub[T any] struct {
 }
 
 func NewMemoHub[T any](ctx context.Context, name string, bufSize int) *MemoHub[T] {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	hub := MemoHub[T]{
 		chanLen: bufSize,
 		id:      GenID(name),
 	}
 
-	hub.init.Do(func() {
+	hub.initOnce.Do(func() {
 		hub.runCtx, hub.cancelFn = context.WithCancel(ctx)
 	})
 
@@ -55,8 +59,8 @@ func (hub *MemoHub[T]) Name() string {
 	return hub.id.String()
 }
 
-func (hub *MemoHub[T]) Stop() {
-	hub.release.Do(func() {
+func (hub *MemoHub[T]) Release() {
+	hub.releaseOnce.Do(func() {
 		hub.disconnectUpstream()
 
 		hub.cancelFn()
@@ -299,7 +303,7 @@ func (hub *MemoHub[T]) PipelineUpStream(src Hub[T], topics ...string) error {
 
 	for _, topic := range topics {
 		pipeline := func(topic string) {
-			defer hub.Stop()
+			defer hub.Release()
 
 			subID, subChan := src.Subscribe(topic, hub.id.String(), Quick)
 			upstreamIdt := hub.makeUpstreamIdentity(src, topic, subID)
