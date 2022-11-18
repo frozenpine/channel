@@ -1,8 +1,0 @@
-syntax="proto3";
-
-package hub;
-option go_package = "/msg";
-
-message Topic {
-    map<string, string> define = 1;
-}

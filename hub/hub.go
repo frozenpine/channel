@@ -10,11 +10,12 @@ import (
 const defaultChanSize = 1
 
 var (
-	ErrNoSubcriber = errors.New("no subscriber")
-	ErrNoTopic     = errors.New("no topic")
-	ErrHubClosed   = errors.New("hub closed")
-	ErrPubTimeout  = errors.New("pub timeout")
-	ErrPipeline    = errors.New("pipeline upstream is nil")
+	ErrNoSubcriber       = errors.New("no subscriber")
+	ErrNoTopic           = errors.New("no topic")
+	ErrHubClosed         = errors.New("hub closed")
+	ErrPubTimeout        = errors.New("pub timeout")
+	ErrPipeline          = errors.New("pipeline upstream is nil")
+	ErrAlreadySubscribed = errors.New("topic already subscribed")
 
 	HubTypeKey = "HubType"
 )

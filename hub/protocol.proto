@@ -1,0 +1,46 @@
+syntax="proto3";
+
+package protocol;
+option go_package = "/protocol";
+
+import "google/protobuf/empty.proto";
+
+message Topics {
+    map<string, string> define = 1;
+}
+
+enum ResumeType {
+    Restart = 0;
+    Resume = 1;
+    Quick = 2;
+};
+
+message RspInfo {
+    sint32 error_id = 1;
+    string error_msg = 2;
+}
+
+message ReqSub {
+    string topic = 1;
+    string subscriber = 2;
+    ResumeType resume_type = 3;
+}
+
+message ReqUnSub {
+    string topic = 1;
+    string sub_id = 2;
+}
+
+message RtnData {
+    string topic = 1;
+    uint32 seq = 2;
+    uint32 len = 3;
+    bytes data = 4;
+}
+
+service HubService {
+    rpc GetTopics(google.protobuf.Empty) returns (Topics);
+    rpc Subscribe(ReqSub) returns(stream RtnData);
+    rpc UnSubscribe(ReqUnSub) returns (RspInfo);
+}
+
