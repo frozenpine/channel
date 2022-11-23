@@ -7,25 +7,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/frozenpine/msgqueue"
 	"github.com/gofrs/uuid"
 )
 
-var (
-	upstreamIdtSep = "."
-
-	cache = sync.Pool{New: func() any { return &sync.Map{} }}
-)
-
-type ResumeType uint8
-
-const (
-	Restart ResumeType = iota
-	Resume
-	Quick
-)
-
-type MemoHub[T any] struct {
+type MemoHub struct {
 	id          uuid.UUID
+	name        string
 	initOnce    sync.Once
 	releaseOnce sync.Once
 
@@ -34,40 +22,40 @@ type MemoHub[T any] struct {
 
 	chanLen int
 
-	subCache sync.Map
-	subWg    sync.WaitGroup
-
-	pubCache sync.Map
-
-	upstreamCache sync.Map
+	topicChanCache sync.Map
 }
 
-func NewMemoHub[T any](ctx context.Context, name string, bufSize int) *MemoHub[T] {
+func NewMemoHub(ctx context.Context, name string, bufSize int) *MemoHub {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	hub := MemoHub[T]{
-		chanLen: bufSize,
-		id:      GenID(name),
+	if name == "" {
+		name = msgqueue.GenName()
 	}
+
+	hub := MemoHub{}
 
 	hub.initOnce.Do(func() {
 		hub.runCtx, hub.cancelFn = context.WithCancel(ctx)
+
+		hub.chanLen = bufSize
+		hub.id = msgqueue.GenID(name)
+		hub.name = name
 	})
 
 	return &hub
 }
 
-func (hub *MemoHub[T]) ID() uuid.UUID {
+func (hub *MemoHub) ID() uuid.UUID {
 	return hub.id
 }
 
-func (hub *MemoHub[T]) Name() string {
+func (hub *MemoHub) Name() string {
 	return hub.id.String()
 }
 
-func (hub *MemoHub[T]) Release() {
+func (hub *MemoHub) Release() {
 	hub.releaseOnce.Do(func() {
 		hub.disconnectUpstream()
 
@@ -131,15 +119,15 @@ func (hub *MemoHub[T]) Join() {
 	hub.subWg.Wait()
 }
 
-func (hub *MemoHub[T]) makeChan() chan T {
+func (hub *MemoHub[T]) makeChan() chan *T {
 	if hub.chanLen >= 0 {
-		return make(chan T, hub.chanLen)
+		return make(chan *T, hub.chanLen)
 	}
 
-	return make(chan T, defaultChanSize)
+	return make(chan *T, defaultChanSize)
 }
 
-func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
+func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan *T) {
 	defer hub.subWg.Done()
 
 	var pubFinished bool
@@ -178,7 +166,7 @@ func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
 			}
 
 			subscribers.Range(func(subcriber, subCh any) bool {
-				ch := subCh.(chan T)
+				ch := subCh.(chan *T)
 
 				select {
 				case <-time.After(time.Second):
@@ -192,11 +180,11 @@ func (hub *MemoHub[T]) dispatcher(topic string, pubCh <-chan T) {
 	}
 }
 
-func (hub *MemoHub[T]) Subscribe(topic string, subscriber string, resumeType ResumeType) (uuid.UUID, <-chan T) {
+func (hub *MemoHub[T]) Subscribe(topic string, subscriber string, resumeType ResumeType) (uuid.UUID, <-chan *T) {
 	topicSub, _ := hub.subCache.LoadOrStore(topic, cache.Get())
 	subCache := topicSub.(*sync.Map)
 
-	subID := GenID(subscriber)
+	subID := msgqueue.GenID(subscriber)
 
 	subChan, subExist := subCache.LoadOrStore(subID, hub.makeChan())
 
@@ -208,7 +196,7 @@ func (hub *MemoHub[T]) Subscribe(topic string, subscriber string, resumeType Res
 
 	hub.loadOrCreatePub(topic)
 
-	return subID, subChan.(chan T)
+	return subID, subChan.(chan *T)
 }
 
 func (hub *MemoHub[T]) UnSubscribe(topic string, subID uuid.UUID) error {
@@ -239,13 +227,13 @@ func (hub *MemoHub[T]) UnSubscribe(topic string, subID uuid.UUID) error {
 	return nil
 }
 
-func (hub *MemoHub[T]) loadOrCreatePub(topic string) chan<- T {
+func (hub *MemoHub[T]) loadOrCreatePub(topic string) chan<- *T {
 	if _, exist := hub.subCache.Load(topic); !exist {
 		return nil
 	}
 
 	topicPub, pubExist := hub.pubCache.LoadOrStore(topic, hub.makeChan())
-	pubChan := topicPub.(chan T)
+	pubChan := topicPub.(chan *T)
 
 	if !pubExist {
 		hub.subWg.Add(1)
@@ -263,7 +251,7 @@ func (hub *MemoHub[T]) timeout(timeout time.Duration) <-chan time.Time {
 	return make(<-chan time.Time)
 }
 
-func (hub *MemoHub[T]) Publish(topic string, v T, timeout time.Duration) error {
+func (hub *MemoHub[T]) Publish(topic string, v *T, timeout time.Duration) error {
 	pubCh := hub.loadOrCreatePub(topic)
 	if pubCh == nil {
 		return ErrNoSubcriber

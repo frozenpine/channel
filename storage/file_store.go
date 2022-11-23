@@ -30,7 +30,7 @@ type FlowFileMeta struct {
 }
 
 func (meta *FlowFileMeta) IsValid() bool {
-	if meta.StartSequence < meta.EndSequence {
+	if meta.StartSequence > meta.EndSequence {
 		return false
 	}
 
@@ -247,14 +247,13 @@ func (f *FlowFile[T]) LinkNext(next *FlowFile[T]) (err error) {
 }
 
 type FileStore[T PersistentData] struct {
-	topic     string
 	flowDir   string
 	flowFiles *RBTree
+	currFlow  *FlowFile[T]
 }
 
-func NewFileStore[T PersistentData](flowDir, topic string) *FileStore[T] {
+func NewFileStore[T PersistentData](flowDir string) *FileStore[T] {
 	store := FileStore[T]{
-		topic:     topic,
 		flowDir:   flowDir,
 		flowFiles: new(RBTree),
 	}
