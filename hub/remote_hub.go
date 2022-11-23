@@ -6,8 +6,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/frozenpine/channel/hub/protocol"
-	"github.com/frozenpine/channel/storage"
+	"github.com/frozenpine/msgqueue/hub/protocol"
+	"github.com/frozenpine/msgqueue/storage"
 	"github.com/gofrs/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

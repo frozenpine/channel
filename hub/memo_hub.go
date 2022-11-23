@@ -16,6 +16,14 @@ var (
 	cache = sync.Pool{New: func() any { return &sync.Map{} }}
 )
 
+type ResumeType uint8
+
+const (
+	Restart ResumeType = iota
+	Resume
+	Quick
+)
+
 type MemoHub[T any] struct {
 	id          uuid.UUID
 	initOnce    sync.Once

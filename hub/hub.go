@@ -35,14 +35,6 @@ const (
 	RemoteHubType
 )
 
-type ResumeType uint8
-
-const (
-	Restart ResumeType = iota
-	Resume
-	Quick
-)
-
 type Consumer[T any] interface {
 	Subscribe(topic string, subscriber string, resumeType ResumeType) (uuid.UUID, <-chan T)
 	UnSubscribe(topic string, subID uuid.UUID) error
