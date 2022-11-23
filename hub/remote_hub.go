@@ -10,6 +10,7 @@ import (
 	"github.com/frozenpine/channel/storage"
 	"github.com/gofrs/uuid"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 var (
@@ -30,10 +31,10 @@ type server[T storage.PersistentData] struct {
 
 	topicSub sync.Map
 
-	upstream Hub[T]
+	hub Hub[T]
 }
 
-func newServer[T storage.PersistentData](listen string, upstream *RemoteHub[T]) (svr *server[T], err error) {
+func newServer[T storage.PersistentData](listen string, hub *RemoteHub[T]) (svr *server[T], err error) {
 	svr = &server[T]{}
 	if svr.lsnr, err = net.Listen("tcp", listen); err != nil {
 		return
@@ -41,13 +42,13 @@ func newServer[T storage.PersistentData](listen string, upstream *RemoteHub[T]) 
 
 	svr.grpcSvr = grpc.NewServer()
 	protocol.RegisterHubServiceServer(svr.grpcSvr, svr)
-	svr.upstream = upstream
+	svr.hub = hub
 
 	go func() {
 		if err := svr.grpcSvr.Serve(svr.lsnr); err != nil {
 			log.Printf("gRPC server error: %v", err)
 
-			upstream.Stop()
+			hub.Stop()
 		}
 	}()
 
@@ -68,7 +69,7 @@ func (svr *server[T]) Subscribe(req *protocol.ReqSub, conn protocol.HubService_S
 	topicSub := svr.getTopicSub(req.Topic)
 
 	if _, exist := topicSub.Load(req.Subscriber); !exist {
-		subID, subChan := svr.upstream.Subscribe(req.Topic, req.Subscriber, ResumeType(req.ResumeType))
+		subID, subChan := svr.hub.Subscribe(req.Topic, req.Subscriber, ResumeType(req.ResumeType))
 
 		topicSub.Store(subID.String(), &clientSub{
 			conn:  conn,
@@ -128,7 +129,12 @@ func (hub *RemoteHub[T]) StartServer(listen string) (err error) {
 
 func (hub *RemoteHub[T]) StartClient(remote string) (err error) {
 	var client *grpc.ClientConn
-	client, err = grpc.DialContext(hub.runCtx, remote)
+
+	client, err = grpc.DialContext(
+		hub.runCtx, remote,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+
 	if err != nil {
 		return
 	}
@@ -153,4 +159,40 @@ func (hub *RemoteHub[T]) Stop() error {
 	// })
 
 	return nil
+}
+
+func (hub *RemoteHub[T]) Subscribe(topic, subscriber string, resume ResumeType) (uuid.UUID, <-chan T) {
+	stream, err := hub.client.Subscribe(hub.runCtx, &protocol.ReqSub{
+		Topic:      topic,
+		Subscriber: subscriber,
+		ResumeType: protocol.ResumeType(resume),
+	})
+
+	if err != nil {
+		log.Printf("Client gRPC subscribe failed: %+v", err)
+	} else {
+		if err := stream.CloseSend(); err != nil {
+			log.Printf("Client gRPC subscribe close failed: %+v", err)
+		} else {
+			go func() {
+				var v T
+
+				for {
+					data, err := stream.Recv()
+					if err != nil {
+						log.Printf("Client gRPC recv failed: %+v", err)
+						break
+					}
+
+					v.Deserialize(data.Data)
+
+					if err := hub.MemoHub.Publish(data.Topic, v, -1); err != nil {
+						log.Printf("Hub publish failed: %+v", err)
+					}
+				}
+			}()
+		}
+	}
+
+	return hub.MemoHub.Subscribe(topic, subscriber, resume)
 }

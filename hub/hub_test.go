@@ -2,9 +2,12 @@ package hub
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestMemoHub(t *testing.T) {
@@ -60,4 +63,57 @@ func TestMemoHub(t *testing.T) {
 	wg.Wait()
 
 	t.Log("topics after sub quit:", hub.Topics())
+}
+
+type Int int
+
+func (v Int) FixSized() bool { return true }
+func (v Int) GetSize() int   { return 4 }
+func (v Int) Serialize() (out []byte) {
+	binary.LittleEndian.PutUint32(out, uint32(v))
+	return
+}
+func (v Int) Deserialize(data []byte) error {
+	v = Int(binary.LittleEndian.Uint32(data))
+	return nil
+}
+
+func TestRemoteHub(t *testing.T) {
+	ctx, fn := context.WithCancel(context.Background())
+
+	server := NewRemoteHub[Int](ctx, "server", 10)
+	client := NewRemoteHub[Int](ctx, "client", 10)
+
+	addr := "127.0.0.1:49152"
+
+	if err := server.StartServer(addr); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := client.StartClient(addr); err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		for {
+			if err := server.Publish("test", Int(rand.Intn(100)), -1); err != nil {
+				t.Logf("Server pub error: %v", err)
+			}
+		}
+	}()
+
+	go func() {
+		_, ch := client.Subscribe("test", "client01", Quick)
+
+		for v := range ch {
+			fmt.Printf("Client sub: %d", v)
+		}
+	}()
+
+	go func() {
+		<-time.After(time.Second * 60)
+		fn()
+	}()
+
+	<-ctx.Done()
 }
