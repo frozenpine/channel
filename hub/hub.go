@@ -58,9 +58,15 @@ func GetOrCreateTopicChannel[T any](hub Hub, topic string) (channel.Channel[T], 
 		func(ctx context.Context, name string, bufSize int) (channel.BaseChan, error) {
 			return channel.NewChannel[T](ctx, name, bufSize)
 		},
-	); err != nil && err != ErrTopicExist {
-		return nil, err
-	} else {
+	); err == nil {
 		return ch.(channel.Channel[T]), nil
+	} else if err == ErrTopicExist {
+		if result, ok := ch.(channel.Channel[T]); ok {
+			return result, nil
+		} else {
+			return nil, errors.Wrap(err, "channel type mismatch")
+		}
+	} else {
+		return nil, err
 	}
 }

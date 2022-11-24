@@ -32,6 +32,13 @@ func TestMemoHub(t *testing.T) {
 			return
 		}
 
+		if _, err := GetHubTopicChannel[float64](hub, topic); err == nil {
+			t.Error("create exist channel failed")
+			return
+		} else {
+			t.Log(err)
+		}
+
 		t.Log(topicCh.Name(), topicCh.ID(), err)
 
 		subID, data := topicCh.Subscribe("test1", channel.Quick)
