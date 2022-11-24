@@ -1,36 +1,6 @@
-package storage
+package msgqueue
 
-import (
-	"log"
-)
-
-type PersistentData interface {
-	FixSized() bool
-	GetSize() int
-	Serialize() []byte
-	Deserialize([]byte) error
-}
-
-type Flow[T PersistentData] interface {
-	FixedSize() uint32
-	StartSequence() uint32
-	EndSequence() uint32
-	TotalDataSize() uint32
-
-	AppendData(data T) (uint32, error)
-	ReadAll() ([]T, error)
-	ReadAt(offset uint32) (T, error)
-
-	FilePath() string
-	FileName() string
-	PreFlow() Flow[T]
-	NextFlow() Flow[T]
-}
-
-type Storage[T PersistentData] interface {
-	Sink(data T) error
-	UnSink(offset int64) <-chan T
-}
+import "log"
 
 type Color uint8
 

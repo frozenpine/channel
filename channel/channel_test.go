@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/frozenpine/msgqueue/channel"
 )
@@ -22,7 +23,7 @@ func TestMemoCh(t *testing.T) {
 
 	t.Log("new channel", ch.Name(), ch.ID())
 
-	dataMax := 99
+	dataMax := 100
 	subCount := 2
 	wg := sync.WaitGroup{}
 	wg.Add(subCount)
@@ -59,6 +60,9 @@ func TestMemoCh(t *testing.T) {
 		if err := ch.Publish(idx, -1); err != nil {
 			t.Logf("publish[%d] failed: %+v", idx, err)
 		}
+
+		// 引入延迟，以防止后续Release早于goroutine的UnSubscribe
+		<-time.After(10 * time.Millisecond)
 	}
 
 	ch.Release()
