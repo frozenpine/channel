@@ -46,7 +46,7 @@ func TestMemoHub(t *testing.T) {
 		t.Logf("channel sub id: %+v", subID)
 
 		for v := range data {
-			t.Log(subID, *v)
+			t.Log(subID, v)
 		}
 	}()
 
@@ -56,12 +56,8 @@ func TestMemoHub(t *testing.T) {
 	}
 	t.Log(topicCh.Name(), topicCh.ID(), err)
 
-	data := make([]int, vCount)
-
 	for idx := 0; idx < vCount; idx++ {
-		data[idx] = idx
-
-		if err := topicCh.Publish(&data[idx], -1); err != nil {
+		if err := topicCh.Publish(idx, -1); err != nil {
 			t.Error("publish error:", err)
 		}
 	}

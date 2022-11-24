@@ -35,19 +35,19 @@ func TestMemoCh(t *testing.T) {
 
 			t.Logf("subscriber[%d]: %v", idx, subID)
 
-			var v *int
+			var v int
 
 			for v = range subCh {
-				if idx%2 == 0 && *v >= dataMax/2 {
+				if idx%2 == 0 && v >= dataMax/2 {
 					if err := ch.UnSubscribe(subID); err != nil {
 						t.Logf("sub channel[%d] %v UnSubscribe failed: %+v", idx, subID, err)
 					}
 				}
 
-				t.Log(idx, subID, *v)
+				t.Log(idx, subID, v)
 			}
 
-			if idx%2 != 0 && *v != dataMax-1 {
+			if idx%2 != 0 && v != dataMax-1 {
 				t.Errorf("sub channel[%d] %v has unread value", idx, subID)
 			}
 
@@ -55,12 +55,8 @@ func TestMemoCh(t *testing.T) {
 		}(idx)
 	}
 
-	var data = make([]int, dataMax)
-
 	for idx := 0; idx < dataMax; idx++ {
-		data[idx] = idx
-
-		if err := ch.Publish(&data[idx], -1); err != nil {
+		if err := ch.Publish(idx, -1); err != nil {
 			t.Logf("publish[%d] failed: %+v", idx, err)
 		}
 	}

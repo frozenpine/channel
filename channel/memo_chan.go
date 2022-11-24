@@ -13,14 +13,14 @@ import (
 
 type sub[T any] struct {
 	once sync.Once
-	data chan *T
+	data chan T
 }
 
 func (sub *sub[T]) close() {
 	sub.once.Do(func() { close(sub.data) })
 }
 
-func (sub *sub[T]) ch() <-chan *T {
+func (sub *sub[T]) ch() <-chan T {
 	return sub.data
 }
 
@@ -35,7 +35,8 @@ type MemoChannel[T any] struct {
 
 	chanLen int
 
-	input chan *T
+	input        chan T
+	waitInfinite <-chan time.Time
 
 	subscriberCache sync.Map
 	subscriberWg    sync.WaitGroup
@@ -44,6 +45,14 @@ type MemoChannel[T any] struct {
 }
 
 func NewMemoChannel[T any](ctx context.Context, name string, bufSize int) *MemoChannel[T] {
+	channel := MemoChannel[T]{}
+
+	channel.init(ctx, name, bufSize, nil)
+
+	return &channel
+}
+
+func (ch *MemoChannel[T]) init(ctx context.Context, name string, bufSize int, extraInit func()) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -56,19 +65,21 @@ func NewMemoChannel[T any](ctx context.Context, name string, bufSize int) *MemoC
 		bufSize = defaultChanSize
 	}
 
-	channel := MemoChannel[T]{}
+	ch.initOnce.Do(func() {
+		ch.runCtx, ch.cancelFn = context.WithCancel(ctx)
+		ch.name = name
+		ch.id = msgqueue.GenID(name)
+		ch.chanLen = bufSize
+		ch.input = ch.makeChan()
+		ch.waitInfinite = make(chan time.Time)
 
-	channel.initOnce.Do(func() {
-		channel.runCtx, channel.cancelFn = context.WithCancel(ctx)
-		channel.name = name
-		channel.id = msgqueue.GenID(name)
-		channel.chanLen = bufSize
-		channel.input = channel.makeChan()
+		if extraInit != nil {
+			extraInit()
+		}
 
-		go channel.inputDispatcher()
+		go ch.inputDispatcher()
 	})
 
-	return &channel
 }
 
 func (ch *MemoChannel[T]) ID() uuid.UUID {
@@ -147,12 +158,12 @@ func (ch *MemoChannel[T]) Join() {
 	ch.subscriberWg.Wait()
 }
 
-func (ch *MemoChannel[T]) makeChan() chan *T {
+func (ch *MemoChannel[T]) makeChan() chan T {
 	if ch.chanLen > 0 {
-		return make(chan *T, ch.chanLen)
+		return make(chan T, ch.chanLen)
 	}
 
-	return make(chan *T, defaultChanSize)
+	return make(chan T, defaultChanSize)
 }
 
 func (ch *MemoChannel[T]) inputDispatcher() {
@@ -181,7 +192,7 @@ func (ch *MemoChannel[T]) inputDispatcher() {
 	}
 }
 
-func (ch *MemoChannel[T]) Subscribe(name string, resumeType ResumeType) (uuid.UUID, <-chan *T) {
+func (ch *MemoChannel[T]) Subscribe(name string, resumeType ResumeType) (uuid.UUID, <-chan T) {
 	subID := msgqueue.GenID(name)
 
 	subData, subExist := ch.subscriberCache.LoadOrStore(subID, &sub[T]{data: ch.makeChan()})
@@ -214,10 +225,10 @@ func (ch *MemoChannel[T]) timeout(timeout time.Duration) <-chan time.Time {
 		return time.After(timeout)
 	}
 
-	return make(<-chan time.Time)
+	return ch.waitInfinite
 }
 
-func (ch *MemoChannel[T]) Publish(v *T, timeout time.Duration) error {
+func (ch *MemoChannel[T]) Publish(v T, timeout time.Duration) error {
 	select {
 	case <-ch.runCtx.Done():
 		return ErrChanClosed

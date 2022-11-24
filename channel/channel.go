@@ -37,13 +37,15 @@ type BaseChan interface {
 	Name() string
 	Release()
 	Join()
+
+	init(ctx context.Context, name string, bufSize int, extraInit func())
 }
 
 type Channel[T any] interface {
 	BaseChan
-	Subscribe(name string, resumeType ResumeType) (uuid.UUID, <-chan *T)
+	Subscribe(name string, resumeType ResumeType) (uuid.UUID, <-chan T)
 	UnSubscribe(subID uuid.UUID) error
-	Publish(v *T, timeout time.Duration) error
+	Publish(v T, timeout time.Duration) error
 	PipelineDownStream(dst Channel[T]) (Channel[T], error)
 	PipelineUpStream(src Channel[T]) error
 }
