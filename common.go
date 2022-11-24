@@ -1,6 +1,7 @@
 package msgqueue
 
 import (
+	"errors"
 	"math/rand"
 	"time"
 	"unsafe"
@@ -46,3 +47,17 @@ func GenName() string {
 	}
 	return *(*string)(unsafe.Pointer(&b))
 }
+
+type Type uint8
+
+type CtxTypeKey string
+
+const CtxQueueType CtxTypeKey = "queue_type"
+
+var ErrInvalidType = errors.New("invalid type")
+
+const (
+	Memory Type = 1 << iota
+	Persistent
+	Remote
+)

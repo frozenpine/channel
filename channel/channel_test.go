@@ -9,6 +9,14 @@ import (
 	"github.com/frozenpine/msgqueue/channel"
 )
 
+func TestChanType(t *testing.T) {
+	memoCh := channel.NewMemoChannel[int](context.TODO(), "test", -1)
+
+	var ch channel.BaseChan = memoCh
+
+	t.Log(ch.Name(), ch.ID())
+}
+
 func TestMemoCh(t *testing.T) {
 	ch := channel.NewMemoChannel[int](context.TODO(), "", 1)
 
