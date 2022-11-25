@@ -1,10 +1,24 @@
 package flow
 
-import "github.com/frozenpine/msgqueue/core"
+import (
+	"github.com/frozenpine/msgqueue/core"
+)
+
+type TagType uint8
+
+//go:generate stringer -type TagType -linecomment
+const (
+	Size8_T       TagType = 1 << iota // one byte type
+	Size16_T                          // two byte type
+	Size32_T                          // four byte type
+	Size64_T                          // eight byte type
+	FixedSize_T                       // fixed len bytes
+	VariantSize_T                     // variant len bytes
+)
 
 type PersistentData interface {
-	Tag() string
-	Size() int
+	Tag() TagType
+	Len() int
 	Serialize() []byte
 	Deserialize([]byte) error
 }
@@ -34,7 +48,6 @@ func (v *FlowItem) Less(than core.Item) bool {
 }
 
 type BaseFlow interface {
-	FixedSize() uint32
 	StartSequence() uint64
 	EndSequence() uint64
 	TotalDataSize() uint64
