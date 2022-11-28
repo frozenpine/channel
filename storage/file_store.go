@@ -1,10 +1,12 @@
 package storage
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
-	"io"
 	"os"
+	"strconv"
+	"sync"
 
 	"github.com/frozenpine/msgqueue/flow"
 	"github.com/pkg/errors"
@@ -12,6 +14,8 @@ import (
 
 const (
 	MaxVarintLen64 = 10
+
+	defaultBufferLen = 4096
 )
 
 var (
@@ -19,20 +23,44 @@ var (
 	ErrFSAlreadyOpened = errors.New("file store already opened")
 	ErrFSAlreadyClosed = errors.New("file store already closed")
 	ErrUnknownTag      = errors.New("unkonwn tag type")
-	ErrOverflow        = errors.New("binary: varint overflows a 64-bit integer")
+	ErrSizeMismatch    = errors.New("data size mismatch")
+	ErrOverflow        = errors.New("varint overflows a 64-bit integer")
+
+	writeBuffer = sync.Pool{New: func() any { return bytes.NewBuffer(make([]byte, 0, defaultBufferLen)) }}
 )
 
 type FileStorage struct {
 	filePath string
 	file     *os.File
+	rd       *bufio.Reader
+	wLen     int
 }
 
-func (f *FileStorage) Open() (err error) {
+func NewFileStore(path string) *FileStorage {
+	store := FileStorage{
+		filePath: path,
+	}
+
+	return &store
+}
+
+func (f *FileStorage) Open(mode Mode) (err error) {
 	if f.file != nil {
 		return ErrFSAlreadyOpened
 	}
 
-	f.file, err = os.OpenFile(f.filePath, os.O_CREATE|os.O_RDWR, os.ModePerm)
+	var opMode int
+
+	switch mode {
+	case RDOnly:
+		opMode = os.O_RDONLY
+	case WROnly:
+		opMode = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	case RDWR:
+		opMode = os.O_CREATE | os.O_RDWR
+	}
+
+	f.file, err = os.OpenFile(f.filePath, opMode, os.ModePerm)
 
 	return
 }
@@ -57,86 +85,102 @@ func (f *FileStorage) Close() (err error) {
 	return f.file.Close()
 }
 
+func (f *FileStorage) getBuffer() *bytes.Buffer {
+	return writeBuffer.Get().(*bytes.Buffer)
+}
+
+func (f *FileStorage) returnBuffer(buf *bytes.Buffer) {
+	buf.Reset()
+	writeBuffer.Put(buf)
+}
+
 func (f *FileStorage) Write(v *flow.FlowItem) error {
 	if v == nil {
 		return ErrEmptyData
 	}
 
-	// min len: epoch(8 bytes)+sequence(8 bytes)+tag(1 byte)+data len
-	// max len: epoch(8 bytes)+sequence(8 bytes)+tag(1 byte)+length(4 bytes)+data len
-	wr := bytes.NewBuffer(make([]byte, 17+v.Data.Len(), 17+4+v.Data.Len()))
+	wr := f.getBuffer()
+	defer f.returnBuffer(wr)
 
-	if err := binary.Write(
-		wr, binary.LittleEndian,
-		binary.AppendUvarint(make([]byte, 1), v.Epoch),
+	bufWLen := 0
+
+	if n, err := wr.Write(
+		binary.AppendUvarint(make([]byte, 0, 1), v.Epoch),
 	); err != nil {
 		return errors.Wrap(err, "append epoch failed")
+	} else {
+		bufWLen += n
 	}
 
-	if err := binary.Write(
-		f.file, binary.LittleEndian,
-		binary.AppendUvarint(make([]byte, 1), v.Sequence),
+	if n, err := wr.Write(
+		binary.AppendUvarint(make([]byte, 0, 1), v.Sequence),
 	); err != nil {
 		return errors.Wrap(err, "append sequence failed")
+	} else {
+		bufWLen += n
 	}
 
 	tag := v.Data.Tag()
 
 	if err := wr.WriteByte(byte(tag)); err != nil {
 		return errors.Wrap(err, "append tag failed")
+	} else {
+		bufWLen++
 	}
+
+	data := v.Data.Serialize()
 
 	switch tag {
 	case flow.Size8_T:
+		fallthrough
 	case flow.Size16_T:
+		fallthrough
 	case flow.Size32_T:
+		fallthrough
 	case flow.Size64_T:
-		// break to bypass write data length for up case
+		// skip append data length for up case
+		if len(data) != v.Data.Len() {
+			return errors.Wrap(
+				ErrSizeMismatch,
+				"serilized data length should be: "+strconv.Itoa(
+					v.Data.Len(),
+				))
+		}
 	case flow.FixedSize_T:
+		if len(data) != v.Data.Len() {
+			return errors.Wrap(
+				ErrSizeMismatch,
+				"serilized data length should be: "+strconv.Itoa(
+					v.Data.Len(),
+				))
+		}
 		fallthrough
 	case flow.VariantSize_T:
-		if err := binary.Write(
-			wr, binary.LittleEndian,
-			binary.AppendUvarint(make([]byte, 1), uint64(v.Data.Len())),
+		if n, err := wr.Write(
+			binary.AppendUvarint(make([]byte, 0, 1), uint64(len(data))),
 		); err != nil {
 			return errors.Wrap(err, "append data len failed")
+		} else {
+			bufWLen += n
 		}
 	default:
 		return errors.Wrap(ErrUnknownTag, tag.String())
 	}
 
-	if _, err := wr.Write(v.Data.Serialize()); err != nil {
+	if n, err := wr.Write(data); err != nil {
 		return errors.Wrap(err, "append data failed")
+	} else {
+		bufWLen += n
 	}
 
-	if _, err := f.file.Write(wr.Bytes()); err != nil {
+	if n, err := f.file.Write(wr.Bytes()); err != nil {
 		return errors.Wrap(err, "write to file failed")
+	} else if n != bufWLen {
+		return errors.New("buffer write size mismatch with file write")
 	} else {
+		f.wLen += n
 		return f.Flush()
 	}
-}
-
-func (f *FileStorage) decodeUvariant(rd io.Reader) (uint64, error) {
-	var x uint64
-	var s uint
-	var data = make([]byte, 1)
-
-	for i := 0; i < MaxVarintLen64; i++ {
-		_, err := rd.Read(data)
-		if err != nil {
-			return x, err
-		}
-		if data[0] < 0x80 {
-			if i == MaxVarintLen64-1 && data[0] > 1 {
-				return x, ErrOverflow
-			}
-			return x | uint64(data[0])<<s, nil
-		}
-		x |= uint64(data[0]&0x7f) << s
-		s += 7
-	}
-
-	return x, ErrOverflow
 }
 
 func (f *FileStorage) Read(v *flow.FlowItem) error {
@@ -144,13 +188,17 @@ func (f *FileStorage) Read(v *flow.FlowItem) error {
 		return ErrEmptyData
 	}
 
-	if d, err := f.decodeUvariant(f.file); err != nil {
+	if f.rd == nil {
+		f.rd = bufio.NewReader(f.file)
+	}
+
+	if d, err := binary.ReadUvarint(f.rd); err != nil {
 		return errors.Wrap(err, "decode epoch failed")
 	} else {
 		v.Epoch = d
 	}
 
-	if d, err := f.decodeUvariant(f.file); err != nil {
+	if d, err := binary.ReadUvarint(f.rd); err != nil {
 		return errors.Wrap(err, "decode epoch failed")
 	} else {
 		v.Sequence = d
@@ -158,8 +206,10 @@ func (f *FileStorage) Read(v *flow.FlowItem) error {
 
 	var tag flow.TagType
 
-	if err := binary.Read(f.file, binary.LittleEndian, &tag); err != nil {
+	if v, err := f.rd.ReadByte(); err != nil {
 		return errors.Wrap(err, "decode tag failed")
+	} else {
+		tag = flow.TagType(v)
 	}
 
 	var len int
@@ -170,13 +220,13 @@ func (f *FileStorage) Read(v *flow.FlowItem) error {
 	case flow.Size16_T:
 		len = 2
 	case flow.Size32_T:
-		len = 3
-	case flow.Size64_T:
 		len = 4
+	case flow.Size64_T:
+		len = 8
 	case flow.FixedSize_T:
 		fallthrough
 	case flow.VariantSize_T:
-		if d, err := f.decodeUvariant(f.file); err != nil {
+		if d, err := binary.ReadUvarint(f.rd); err != nil {
 			return errors.Wrap(err, "decode data len failed")
 		} else {
 			len = int(d)
@@ -186,7 +236,7 @@ func (f *FileStorage) Read(v *flow.FlowItem) error {
 	}
 
 	data := make([]byte, len)
-	if _, err := f.file.Read(data); err != nil {
+	if _, err := f.rd.Read(data); err != nil {
 		return errors.Wrap(err, "read data payload failed")
 	}
 
