@@ -20,5 +20,5 @@ type Storage interface {
 	BaseStorage
 
 	Write(*flow.FlowItem) error
-	Read(*flow.FlowItem) error
+	Read() (*flow.FlowItem, error)
 }

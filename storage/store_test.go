@@ -2,6 +2,8 @@ package storage_test
 
 import (
 	"encoding/binary"
+	"errors"
+	"io"
 	"testing"
 
 	"github.com/frozenpine/msgqueue/flow"
@@ -71,19 +73,24 @@ func TestFileStore(t *testing.T) {
 		t.Fatal("store open failed:", err)
 	}
 
+	v1 := Int{100}
+	v2 := Varaint{
+		name: "testtest",
+		data: Int{200},
+	}
+
 	item1 := flow.FlowItem{
 		Epoch:    0,
 		Sequence: 1,
-		Data:     &Int{100},
+		Tag:      flow.Size32_T,
+		Data:     v1.Serialize(),
 	}
 
 	item2 := flow.FlowItem{
 		Epoch:    0,
 		Sequence: 2,
-		Data: &Varaint{
-			name: "testtest",
-			data: Int{200},
-		},
+		Tag:      flow.VariantSize_T,
+		Data:     v2.Serialize(),
 	}
 
 	if err := store.Write(&item1); err != nil {
@@ -103,18 +110,23 @@ func TestFileStore(t *testing.T) {
 		t.Fatal("store open failed:", err)
 	}
 
-	rdItem1 := flow.FlowItem{Data: new(Int)}
-	rdItem2 := flow.FlowItem{Data: new(Varaint)}
-
-	if err := store.Read(&rdItem1); err != nil {
+	if rd1, err := store.Read(); err != nil {
 		t.Fatal(err)
+	} else {
+		t.Log(rd1)
 	}
 
-	if err := store.Read(&rdItem2); err != nil {
+	if rd2, err := store.Read(); err != nil {
 		t.Fatal(err)
+	} else {
+		t.Log(rd2)
 	}
 
-	t.Logf("%+v, %+v\n%+v, %+v", rdItem1, rdItem1.Data.(*Int), rdItem2, rdItem2.Data.(*Varaint))
+	if _, err := store.Read(); errors.Is(err, io.EOF) {
+		t.Log("end of flow file")
+	} else {
+		t.Fatal(err)
+	}
 
 	store.Close()
 }

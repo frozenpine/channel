@@ -26,7 +26,8 @@ type PersistentData interface {
 type FlowItem struct {
 	Epoch    uint64
 	Sequence uint64
-	Data     PersistentData
+	Tag      TagType
+	Data     []byte
 }
 
 func (v *FlowItem) Less(than core.Item) bool {
