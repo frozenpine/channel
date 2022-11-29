@@ -120,9 +120,9 @@ func (f *FileStorage) Write(v *flow.FlowItem) error {
 	}
 
 	if n, err := wr.Write(
-		binary.AppendUvarint(make([]byte, 0, 1), v.TID.ZigZag()),
+		binary.AppendUvarint(make([]byte, 0, 1), uint64(v.TID)),
 	); err != nil {
-		return errors.Wrap(err, "append tag failed")
+		return errors.Wrap(err, "append tid failed")
 	} else {
 		bufWLen += n
 	}

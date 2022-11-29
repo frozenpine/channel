@@ -19,10 +19,6 @@ var (
 
 type TID int
 
-func (v TID) ZigZag() uint64 {
-	return uint64(v)
-}
-
 func RegisterType(newFn func() PersistentData) TID {
 	typeCacheLock.Lock()
 	defer typeCacheLock.Unlock()
