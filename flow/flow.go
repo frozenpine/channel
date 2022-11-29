@@ -2,6 +2,7 @@ package flow
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"sync"
 
@@ -36,7 +37,7 @@ func RegisterType(newFn func() PersistentData) TID {
 // from persistent storage
 func NewTypeValue(tid TID) (PersistentData, error) {
 	if tid < 0 || int(tid) >= len(typeCache) {
-		return nil, errors.New("TID out of range")
+		return nil, errors.New(fmt.Sprintf("TID[%d] out of range", tid))
 	}
 
 	data := typeCache[tid].Get().(PersistentData)

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"os"
+	"runtime"
 	"sync"
 
 	"github.com/frozenpine/msgqueue/flow"
@@ -23,9 +24,10 @@ var (
 	ErrFSAlreadyClosed = errors.New("file store already closed")
 	ErrUnknownTag      = errors.New("unkonwn tag type")
 	ErrSizeMismatch    = errors.New("data size mismatch")
-	ErrOverflow        = errors.New("varint overflows a 64-bit integer")
+	ErrVintOverflow    = errors.New("varint overflows a 64-bit integer")
 
 	writeBuffer = sync.Pool{New: func() any { return bytes.NewBuffer(make([]byte, 0, defaultBufferLen)) }}
+	flowBuffer  = sync.Pool{New: func() any { return &flow.FlowItem{} }}
 )
 
 type FileStorage struct {
@@ -100,6 +102,12 @@ func (f *FileStorage) returnBuffer(buf *bytes.Buffer) {
 	writeBuffer.Put(buf)
 }
 
+func (f *FileStorage) getFlow() *flow.FlowItem {
+	flow := flowBuffer.Get().(*flow.FlowItem)
+	runtime.SetFinalizer(flow, flowBuffer.Put)
+	return flow
+}
+
 func (f *FileStorage) Write(v *flow.FlowItem) error {
 	if v == nil {
 		return ErrEmptyData
@@ -165,7 +173,7 @@ func (f *FileStorage) Read() (fl *flow.FlowItem, err error) {
 		f.rd = bufio.NewReader(f.file)
 	}
 
-	fl = &flow.FlowItem{}
+	fl = f.getFlow()
 
 	if epoch, err := binary.ReadUvarint(f.rd); err != nil {
 		return nil, errors.Wrap(err, "decode epoch failed")

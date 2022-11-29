@@ -15,7 +15,7 @@ type Int struct {
 }
 
 func (v Int) Serialize() []byte {
-	result := make([]byte, 4)
+	result := make([]byte, 0, 4)
 
 	binary.LittleEndian.PutUint32(result, uint32(v.int))
 
@@ -122,4 +122,57 @@ func TestFileStore(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func BenchmarkFileStoreWR(b *testing.B) {
+	tid := flow.RegisterType(func() flow.PersistentData {
+		return &Varaint{}
+	})
+
+	flowFile := "flow_bench.dat"
+
+	store := storage.NewFileStore(flowFile)
+	store.Open(storage.WROnly)
+
+	for i := 0; i < b.N; i++ {
+		v := Varaint{
+			name: "testtest",
+			data: Int{i},
+		}
+
+		if err := store.Write(&flow.FlowItem{
+			Epoch:    0,
+			Sequence: uint64(i),
+			TID:      tid,
+			Data:     &v,
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFileStoreRD(b *testing.B) {
+	flow.RegisterType(func() flow.PersistentData {
+		return &Varaint{}
+	})
+
+	flowFile := "flow_bench.dat"
+
+	store := storage.NewFileStore(flowFile)
+	store.Open(storage.RDOnly)
+
+	for {
+		v, err := store.Read()
+
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.Log(v)
+	}
+
 }
