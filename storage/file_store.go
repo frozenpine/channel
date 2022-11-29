@@ -119,36 +119,25 @@ func (f *FileStorage) Write(v *flow.FlowItem) error {
 		bufWLen += n
 	}
 
-	if err := wr.WriteByte(byte(v.Tag)); err != nil {
+	if n, err := wr.Write(
+		binary.AppendUvarint(make([]byte, 0, 1), v.TID.ZigZag()),
+	); err != nil {
 		return errors.Wrap(err, "append tag failed")
 	} else {
-		bufWLen++
+		bufWLen += n
 	}
 
-	switch v.Tag {
-	case flow.Size8_T:
-		fallthrough
-	case flow.Size16_T:
-		fallthrough
-	case flow.Size32_T:
-		fallthrough
-	case flow.Size64_T:
-		// skip append data length for up case
-	case flow.FixedSize_T:
-		fallthrough
-	case flow.VariantSize_T:
-		if n, err := wr.Write(
-			binary.AppendUvarint(make([]byte, 0, 1), uint64(len(v.Data))),
-		); err != nil {
-			return errors.Wrap(err, "append data len failed")
-		} else {
-			bufWLen += n
-		}
-	default:
-		return errors.Wrap(ErrUnknownTag, v.Tag.String())
+	data := v.Data.Serialize()
+
+	if n, err := wr.Write(
+		binary.AppendUvarint(make([]byte, 0, 1), uint64(len(data))),
+	); err != nil {
+		return errors.Wrap(err, "append data len failed")
+	} else {
+		bufWLen += n
 	}
 
-	if n, err := wr.Write(v.Data); err != nil {
+	if n, err := wr.Write(data); err != nil {
 		return errors.Wrap(err, "append data failed")
 	} else {
 		bufWLen += n
@@ -171,50 +160,40 @@ func (f *FileStorage) Read() (*flow.FlowItem, error) {
 
 	v := flow.FlowItem{}
 
-	if d, err := binary.ReadUvarint(f.rd); err != nil {
+	if epoch, err := binary.ReadUvarint(f.rd); err != nil {
 		return nil, errors.Wrap(err, "decode epoch failed")
 	} else {
-		v.Epoch = d
+		v.Epoch = epoch
 	}
 
-	if d, err := binary.ReadUvarint(f.rd); err != nil {
+	if seq, err := binary.ReadUvarint(f.rd); err != nil {
 		return nil, errors.Wrap(err, "decode epoch failed")
 	} else {
-		v.Sequence = d
+		v.Sequence = seq
 	}
 
-	if tag, err := f.rd.ReadByte(); err != nil {
+	if tid, err := binary.ReadUvarint(f.rd); err != nil {
 		return nil, errors.Wrap(err, "decode tag failed")
 	} else {
-		v.Tag = flow.TagType(tag)
+		v.TID = flow.TID(tid)
 	}
+
+	v.Data = flow.NewTypeValue(v.TID)
 
 	var len int
-
-	switch v.Tag {
-	case flow.Size8_T:
-		len = 1
-	case flow.Size16_T:
-		len = 2
-	case flow.Size32_T:
-		len = 4
-	case flow.Size64_T:
-		len = 8
-	case flow.FixedSize_T:
-		fallthrough
-	case flow.VariantSize_T:
-		if d, err := binary.ReadUvarint(f.rd); err != nil {
-			return nil, errors.Wrap(err, "decode data len failed")
-		} else {
-			len = int(d)
-		}
-	default:
-		return nil, errors.Wrap(ErrUnknownTag, v.Tag.String())
+	if d, err := binary.ReadUvarint(f.rd); err != nil {
+		return nil, errors.Wrap(err, "decode data len failed")
+	} else {
+		len = int(d)
 	}
 
-	v.Data = make([]byte, len)
-	if _, err := f.rd.Read(v.Data); err != nil {
+	data := make([]byte, len)
+	if _, err := f.rd.Read(data); err != nil {
 		return nil, errors.Wrap(err, "read data payload failed")
+	}
+
+	if err := v.Data.Deserialize(data); err != nil {
+		return nil, errors.Wrap(err, "parse data payload failed")
 	}
 
 	return &v, nil

@@ -14,10 +14,6 @@ type Int struct {
 	int
 }
 
-func (v Int) Tag() flow.TagType {
-	return flow.Size32_T
-}
-
 func (v Int) Len() int {
 	return 4
 }
@@ -39,10 +35,6 @@ func (v *Int) Deserialize(data []byte) error {
 type Varaint struct {
 	name string
 	data Int
-}
-
-func (v Varaint) Tag() flow.TagType {
-	return flow.VariantSize_T
 }
 
 func (v Varaint) Len() int {
@@ -73,6 +65,13 @@ func TestFileStore(t *testing.T) {
 		t.Fatal("store open failed:", err)
 	}
 
+	t1 := flow.RegisterType(func() flow.PersistentData {
+		return &Int{}
+	})
+	t2 := flow.RegisterType(func() flow.PersistentData {
+		return &Varaint{}
+	})
+
 	v1 := Int{100}
 	v2 := Varaint{
 		name: "testtest",
@@ -82,15 +81,15 @@ func TestFileStore(t *testing.T) {
 	item1 := flow.FlowItem{
 		Epoch:    0,
 		Sequence: 1,
-		Tag:      flow.Size32_T,
-		Data:     v1.Serialize(),
+		TID:      t1,
+		Data:     &v1,
 	}
 
 	item2 := flow.FlowItem{
 		Epoch:    0,
 		Sequence: 2,
-		Tag:      flow.VariantSize_T,
-		Data:     v2.Serialize(),
+		TID:      t2,
+		Data:     &v2,
 	}
 
 	if err := store.Write(&item1); err != nil {
@@ -113,13 +112,13 @@ func TestFileStore(t *testing.T) {
 	if rd1, err := store.Read(); err != nil {
 		t.Fatal(err)
 	} else {
-		t.Log(rd1)
+		t.Log(rd1, *rd1.Data.(*Int))
 	}
 
 	if rd2, err := store.Read(); err != nil {
 		t.Fatal(err)
 	} else {
-		t.Log(rd2)
+		t.Log(rd2, *rd2.Data.(*Varaint))
 	}
 
 	if _, err := store.Read(); errors.Is(err, io.EOF) {

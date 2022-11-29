@@ -7,10 +7,8 @@ import (
 	"github.com/frozenpine/msgqueue/flow"
 )
 
-type Int int
-
-func (v Int) Tag() flow.TagType {
-	return flow.Size32_T
+type Int struct {
+	int
 }
 
 func (v Int) Len() int {
@@ -20,24 +18,20 @@ func (v Int) Len() int {
 func (v Int) Serialize() []byte {
 	result := make([]byte, 4)
 
-	binary.LittleEndian.PutUint32(result, uint32(v))
+	binary.LittleEndian.PutUint32(result, uint32(v.int))
 
 	return result
 }
 
 func (v *Int) Deserialize(data []byte) error {
 	result := binary.LittleEndian.Uint32(data)
-	*v = Int(result)
+	v.int = int(result)
 	return nil
 }
 
 type Varaint struct {
 	name string
 	data Int
-}
-
-func (v Varaint) Tag() flow.TagType {
-	return flow.VariantSize_T
 }
 
 func (v Varaint) Len() int {
@@ -60,9 +54,13 @@ func (v *Varaint) Deserialize(data []byte) error {
 }
 
 func TestType(t *testing.T) {
-	var v Int = 255
+	var v = Int{255}
 
-	t.Log(v.Tag(), v.Len())
+	tag := flow.RegisterType(func() flow.PersistentData {
+		return &Int{}
+	})
+
+	t.Log(v, tag, v.Len())
 
 	data := v.Serialize()
 
@@ -80,12 +78,12 @@ func TestType(t *testing.T) {
 
 	t1 := Varaint{
 		name: "testtest",
-		data: 32687,
+		data: Int{32687},
 	}
 
 	t1_data := t1.Serialize()
 
-	t.Log(t1.Tag(), t1_data)
+	t.Log(t1, t1_data)
 
 	var t2 Varaint
 

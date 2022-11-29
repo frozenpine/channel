@@ -1,33 +1,49 @@
 package flow
 
 import (
+	"sync"
+
 	"github.com/frozenpine/msgqueue/core"
 )
 
-type TagType uint8
-
-//go:generate stringer -type TagType -linecomment
-const (
-	Size8_T       TagType = 1 << iota // one byte type
-	Size16_T                          // two byte type
-	Size32_T                          // four byte type
-	Size64_T                          // eight byte type
-	FixedSize_T                       // fixed len bytes
-	VariantSize_T                     // variant len bytes
-)
-
 type PersistentData interface {
-	Tag() TagType
 	Len() int
 	Serialize() []byte
 	Deserialize([]byte) error
 }
 
+var (
+	typeCache     = []sync.Pool{}
+	typeCacheLock = sync.RWMutex{}
+)
+
+type TID int
+
+func (v TID) ZigZag() uint64 {
+	return uint64(v)
+}
+
+func RegisterType(newFn func() PersistentData) TID {
+	typeCacheLock.Lock()
+	defer typeCacheLock.Unlock()
+
+	typeCache = append(typeCache, sync.Pool{New: func() any { return newFn() }})
+	return TID(len(typeCache) - 1)
+}
+
+func NewTypeValue(tid TID) PersistentData {
+	if tid < 0 || int(tid) >= len(typeCache) {
+		return nil
+	}
+
+	return typeCache[tid].Get().(PersistentData)
+}
+
 type FlowItem struct {
 	Epoch    uint64
 	Sequence uint64
-	Tag      TagType
-	Data     []byte
+	TID      TID
+	Data     PersistentData
 }
 
 func (v *FlowItem) Less(than core.Item) bool {
