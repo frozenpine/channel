@@ -2,6 +2,7 @@ package flow
 
 import (
 	"errors"
+	"runtime"
 	"sync"
 
 	"github.com/frozenpine/msgqueue/core"
@@ -38,7 +39,20 @@ func NewTypeValue(tid TID) (PersistentData, error) {
 		return nil, errors.New("TID out of range")
 	}
 
-	return typeCache[tid].Get().(PersistentData), nil
+	data := typeCache[tid].Get().(PersistentData)
+
+	// RAII for put back data to pool
+	runtime.SetFinalizer(data, typeCache[tid].Put)
+
+	return data, nil
+}
+
+func ReturnTypeValue(tid TID, v PersistentData) {
+	if tid < 0 || int(tid) >= len(typeCache) {
+		return
+	}
+
+	typeCache[tid].Put(v)
 }
 
 type FlowItem struct {
