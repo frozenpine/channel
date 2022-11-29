@@ -1,38 +1,44 @@
 package flow
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/frozenpine/msgqueue/core"
 )
 
 type PersistentData interface {
-	Len() int
 	Serialize() []byte
 	Deserialize([]byte) error
 }
 
 var (
-	typeCache     = []sync.Pool{}
-	typeCacheLock = sync.RWMutex{}
+	typeCache = []sync.Pool{}
+	// typeCacheLock = sync.RWMutex{}
 )
 
 type TID int
 
+// RegisterType register PersistentData type.
+// TID present unique identity for PersistentData
+// and type register action must always in same order
 func RegisterType(newFn func() PersistentData) TID {
-	typeCacheLock.Lock()
-	defer typeCacheLock.Unlock()
+	// typeCacheLock.Lock()
+	// defer typeCacheLock.Unlock()
 
 	typeCache = append(typeCache, sync.Pool{New: func() any { return newFn() }})
 	return TID(len(typeCache) - 1)
 }
 
-func NewTypeValue(tid TID) PersistentData {
+// NewTypeValue create PersistentData type.
+// TID is unique identity for type creation
+// from persistent storage
+func NewTypeValue(tid TID) (PersistentData, error) {
 	if tid < 0 || int(tid) >= len(typeCache) {
-		return nil
+		return nil, errors.New("TID out of range")
 	}
 
-	return typeCache[tid].Get().(PersistentData)
+	return typeCache[tid].Get().(PersistentData), nil
 }
 
 type FlowItem struct {

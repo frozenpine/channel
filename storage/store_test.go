@@ -14,10 +14,6 @@ type Int struct {
 	int
 }
 
-func (v Int) Len() int {
-	return 4
-}
-
 func (v Int) Serialize() []byte {
 	result := make([]byte, 4)
 
@@ -35,10 +31,6 @@ func (v *Int) Deserialize(data []byte) error {
 type Varaint struct {
 	name string
 	data Int
-}
-
-func (v Varaint) Len() int {
-	return -1
 }
 
 func (v Varaint) Serialize() []byte {
@@ -127,5 +119,7 @@ func TestFileStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store.Close()
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -153,32 +153,34 @@ func (f *FileStorage) Write(v *flow.FlowItem) error {
 	}
 }
 
-func (f *FileStorage) Read() (*flow.FlowItem, error) {
+func (f *FileStorage) Read() (fl *flow.FlowItem, err error) {
 	if f.rd == nil {
 		f.rd = bufio.NewReader(f.file)
 	}
 
-	v := flow.FlowItem{}
+	fl = &flow.FlowItem{}
 
 	if epoch, err := binary.ReadUvarint(f.rd); err != nil {
 		return nil, errors.Wrap(err, "decode epoch failed")
 	} else {
-		v.Epoch = epoch
+		fl.Epoch = epoch
 	}
 
 	if seq, err := binary.ReadUvarint(f.rd); err != nil {
 		return nil, errors.Wrap(err, "decode epoch failed")
 	} else {
-		v.Sequence = seq
+		fl.Sequence = seq
 	}
 
 	if tid, err := binary.ReadUvarint(f.rd); err != nil {
 		return nil, errors.Wrap(err, "decode tag failed")
 	} else {
-		v.TID = flow.TID(tid)
+		fl.TID = flow.TID(tid)
 	}
 
-	v.Data = flow.NewTypeValue(v.TID)
+	if fl.Data, err = flow.NewTypeValue(fl.TID); err != nil {
+		return nil, errors.Wrap(err, "create flow data failed")
+	}
 
 	var len int
 	if d, err := binary.ReadUvarint(f.rd); err != nil {
@@ -192,9 +194,9 @@ func (f *FileStorage) Read() (*flow.FlowItem, error) {
 		return nil, errors.Wrap(err, "read data payload failed")
 	}
 
-	if err := v.Data.Deserialize(data); err != nil {
+	if err := fl.Data.Deserialize(data); err != nil {
 		return nil, errors.Wrap(err, "parse data payload failed")
 	}
 
-	return &v, nil
+	return
 }
