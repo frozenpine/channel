@@ -30,6 +30,7 @@ var (
 
 type FileStorage struct {
 	filePath string
+	mode     Mode
 	file     *os.File
 	rd       *bufio.Reader
 	wLen     int
@@ -61,6 +62,8 @@ func (f *FileStorage) Open(mode Mode) (err error) {
 
 	f.file, err = os.OpenFile(f.filePath, opMode, os.ModePerm)
 
+	f.mode = mode
+
 	return
 }
 
@@ -69,7 +72,11 @@ func (f *FileStorage) Flush() error {
 		return ErrFSAlreadyClosed
 	}
 
-	return f.file.Sync()
+	if f.mode&WROnly == WROnly {
+		return f.file.Sync()
+	}
+
+	return nil
 }
 
 func (f *FileStorage) Close() (err error) {
