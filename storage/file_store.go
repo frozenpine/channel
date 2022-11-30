@@ -16,6 +16,7 @@ const (
 	MaxVarintLen64 = 10
 
 	defaultBufferLen = 4096
+	commitSize       = 4096 * 10
 )
 
 var (
@@ -31,11 +32,12 @@ var (
 )
 
 type FileStorage struct {
-	filePath string
-	mode     Mode
-	file     *os.File
-	rd       *bufio.Reader
-	wLen     int
+	filePath   string
+	mode       Mode
+	file       *os.File
+	rd         *bufio.Reader
+	wLen       int
+	uncommited int
 }
 
 func NewFileStore(path string) *FileStorage {
@@ -164,7 +166,12 @@ func (f *FileStorage) Write(v *flow.FlowItem) error {
 		return errors.New("buffer write size mismatch with file write")
 	} else {
 		f.wLen += n
-		return f.Flush()
+		f.uncommited += n
+		if f.uncommited >= commitSize {
+			f.uncommited = 0
+			return f.Flush()
+		}
+		return nil
 	}
 }
 
