@@ -2,16 +2,8 @@ package storage
 
 import "github.com/frozenpine/msgqueue/flow"
 
-type Mode uint8
-
-const (
-	RDOnly Mode = 1 << iota
-	WROnly
-	RDWR Mode = RDOnly | WROnly
-)
-
 type BaseStorage interface {
-	Open(Mode) error
+	Open(int) error
 	Close() error
 	Flush() error
 }

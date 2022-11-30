@@ -1,9 +1,11 @@
 package storage_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/frozenpine/msgqueue/flow"
@@ -15,7 +17,7 @@ type Int struct {
 }
 
 func (v Int) Serialize() []byte {
-	result := make([]byte, 0, 4)
+	result := make([]byte, 4)
 
 	binary.LittleEndian.PutUint32(result, uint32(v.int))
 
@@ -43,7 +45,11 @@ func (v Varaint) Serialize() []byte {
 
 func (v *Varaint) Deserialize(data []byte) error {
 	len := len(data)
-	v.data.Deserialize(data[len-4:])
+
+	if err := v.data.Deserialize(data[len-4:]); err != nil {
+		return err
+	}
+
 	v.name = string(data[0 : len-4])
 	return nil
 }
@@ -53,14 +59,14 @@ func TestFileStore(t *testing.T) {
 
 	store := storage.NewFileStore(flowFile)
 
-	if err := store.Open(storage.WROnly); err != nil {
+	if err := store.Open(os.O_WRONLY | os.O_CREATE | os.O_TRUNC); err != nil {
 		t.Fatal("store open failed:", err)
 	}
 
-	t1 := flow.RegisterType(func() flow.PersistentData {
+	t1 := flow.RegisterType(&Int{}, func() flow.PersistentData {
 		return &Int{}
 	})
-	t2 := flow.RegisterType(func() flow.PersistentData {
+	t2 := flow.RegisterType(&Varaint{}, func() flow.PersistentData {
 		return &Varaint{}
 	})
 
@@ -97,7 +103,7 @@ func TestFileStore(t *testing.T) {
 	}
 
 	store = storage.NewFileStore(flowFile)
-	if err := store.Open(storage.RDOnly); err != nil {
+	if err := store.Open(os.O_RDONLY); err != nil {
 		t.Fatal("store open failed:", err)
 	}
 
@@ -124,44 +130,104 @@ func TestFileStore(t *testing.T) {
 	}
 }
 
+func TestRegisterType(t *testing.T) {
+	var (
+		count   = 5
+		tidList = make([]flow.TID, count)
+	)
+
+	for i := 0; i < count; i++ {
+		tidList[i] = flow.RegisterType(&Varaint{}, func() flow.PersistentData {
+			return &Varaint{}
+		})
+	}
+
+	for i := 1; i < count-1; i++ {
+		if tidList[i-1] != tidList[i+1] {
+			t.Fatal("tid mismatch", tidList)
+		}
+	}
+}
+
+func TestDecode(t *testing.T) {
+	data := []byte{0x00, 0xf8, 0x01, 0x00, 0x18, 0x74, 0x65, 0x73, 0x74, 0x74, 0x65, 0x73, 0x74, 0xf8, 0x00, 0x00, 0x00}
+
+	rd := bytes.NewReader(data)
+
+	if epoch, err := binary.ReadUvarint(rd); err != nil {
+		t.Fatal(err)
+	} else {
+		t.Log(epoch)
+	}
+
+	if seq, err := binary.ReadUvarint(rd); err != nil {
+		t.Fatal(err)
+	} else {
+		t.Log(seq)
+	}
+
+	if tid, err := binary.ReadVarint(rd); err != nil {
+		t.Fatal(err)
+	} else {
+		t.Log(tid)
+	}
+
+	var l int
+	if v, err := binary.ReadVarint(rd); err != nil {
+		t.Fatal(err)
+	} else {
+		t.Log(v)
+		l = int(v)
+	}
+
+	v := make([]byte, l)
+	if n, err := rd.Read(v); err != nil || n != l {
+		t.Fatal(err, n)
+	} else {
+		s := string(v[0 : n-4])
+		d := binary.LittleEndian.Uint32(v[n-4:])
+		t.Log(s, d)
+	}
+}
+
 func BenchmarkFileStoreWR(b *testing.B) {
-	tid := flow.RegisterType(func() flow.PersistentData {
+	tid := flow.RegisterType(&Varaint{}, func() flow.PersistentData {
 		return &Varaint{}
 	})
 
-	flowFile := "flow_bench.dat"
+	store := storage.NewFileStore("flow_bench.dat")
+	store.Open(os.O_WRONLY | os.O_CREATE | os.O_TRUNC)
 
-	store := storage.NewFileStore(flowFile)
-	store.Open(storage.WROnly)
+	v := Varaint{}
 
+	b.ResetTimer()
+	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		v := Varaint{
-			name: "testtest",
-			data: Int{i},
-		}
+		v.name = "testtest"
+		v.data.int = i
 
-		if err := store.Write(&flow.FlowItem{
-			Epoch:    0,
-			Sequence: uint64(i),
-			TID:      tid,
-			Data:     &v,
-		}); err != nil {
+		flow := store.NewFlowItem()
+		flow.Sequence = uint64(i)
+		flow.TID = tid
+		flow.Data = &v
+
+		if err := store.Write(flow); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func BenchmarkFileStoreRD(b *testing.B) {
-	flow.RegisterType(func() flow.PersistentData {
+	flow.RegisterType(&Varaint{}, func() flow.PersistentData {
 		return &Varaint{}
 	})
 
-	flowFile := "flow_bench.dat"
+	store := storage.NewFileStore("flow_bench.dat")
+	store.Open(os.O_RDONLY)
 
-	store := storage.NewFileStore(flowFile)
-	store.Open(storage.RDOnly)
-
-	for {
+	b.ResetTimer()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
 		v, err := store.Read()
 
 		if errors.Is(err, io.EOF) {
@@ -169,10 +235,9 @@ func BenchmarkFileStoreRD(b *testing.B) {
 		}
 
 		if err != nil {
-			b.Fatal(err)
+			b.Fatal(err, v)
 		}
-
-		b.Log(v)
 	}
 
+	store.Close()
 }
