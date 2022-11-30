@@ -8,7 +8,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/frozenpine/msgqueue/flow"
 	"github.com/frozenpine/msgqueue/storage"
 )
 
@@ -63,10 +62,10 @@ func TestFileStore(t *testing.T) {
 		t.Fatal("store open failed:", err)
 	}
 
-	t1 := flow.RegisterType(&Int{}, func() flow.PersistentData {
+	t1 := storage.RegisterType(&Int{}, func() storage.PersistentData {
 		return &Int{}
 	})
-	t2 := flow.RegisterType(&Varaint{}, func() flow.PersistentData {
+	t2 := storage.RegisterType(&Varaint{}, func() storage.PersistentData {
 		return &Varaint{}
 	})
 
@@ -76,25 +75,11 @@ func TestFileStore(t *testing.T) {
 		data: Int{200},
 	}
 
-	item1 := flow.FlowItem{
-		Epoch:    0,
-		Sequence: 1,
-		TID:      t1,
-		Data:     &v1,
-	}
-
-	item2 := flow.FlowItem{
-		Epoch:    0,
-		Sequence: 2,
-		TID:      t2,
-		Data:     &v2,
-	}
-
-	if err := store.Write(&item1); err != nil {
+	if err := store.Write(t1, &v1); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := store.Write(&item2); err != nil {
+	if err := store.Write(t2, &v2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,13 +95,13 @@ func TestFileStore(t *testing.T) {
 	if rd1, err := store.Read(); err != nil {
 		t.Fatal(err)
 	} else {
-		t.Log(rd1, *rd1.Data.(*Int))
+		t.Log(rd1)
 	}
 
 	if rd2, err := store.Read(); err != nil {
 		t.Fatal(err)
 	} else {
-		t.Log(rd2, *rd2.Data.(*Varaint))
+		t.Log(rd2)
 	}
 
 	if _, err := store.Read(); errors.Is(err, io.EOF) {
@@ -133,11 +118,11 @@ func TestFileStore(t *testing.T) {
 func TestRegisterType(t *testing.T) {
 	var (
 		count   = 5
-		tidList = make([]flow.TID, count)
+		tidList = make([]storage.TID, count)
 	)
 
 	for i := 0; i < count; i++ {
-		tidList[i] = flow.RegisterType(&Varaint{}, func() flow.PersistentData {
+		tidList[i] = storage.RegisterType(&Varaint{}, func() storage.PersistentData {
 			return &Varaint{}
 		})
 	}
@@ -191,7 +176,7 @@ func TestDecode(t *testing.T) {
 }
 
 func BenchmarkFileStoreWR(b *testing.B) {
-	tid := flow.RegisterType(&Varaint{}, func() flow.PersistentData {
+	tid := storage.RegisterType(&Varaint{}, func() storage.PersistentData {
 		return &Varaint{}
 	})
 
@@ -206,19 +191,14 @@ func BenchmarkFileStoreWR(b *testing.B) {
 		v.name = "testtest"
 		v.data.int = i
 
-		flow := store.NewFlowItem()
-		flow.Sequence = uint64(i)
-		flow.TID = tid
-		flow.Data = &v
-
-		if err := store.Write(flow); err != nil {
+		if err := store.Write(tid, &v); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
 func BenchmarkFileStoreRD(b *testing.B) {
-	flow.RegisterType(&Varaint{}, func() flow.PersistentData {
+	storage.RegisterType(&Varaint{}, func() storage.PersistentData {
 		return &Varaint{}
 	})
 
@@ -231,6 +211,7 @@ func BenchmarkFileStoreRD(b *testing.B) {
 		v, err := store.Read()
 
 		if errors.Is(err, io.EOF) {
+			b.Log("flow end", b.N)
 			break
 		}
 

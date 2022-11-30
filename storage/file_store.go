@@ -2,14 +2,10 @@ package storage
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"io"
 	"os"
-	"runtime"
-	"sync"
 
-	"github.com/frozenpine/msgqueue/flow"
 	"github.com/pkg/errors"
 )
 
@@ -28,8 +24,6 @@ var (
 	ErrUnknownTag      = errors.New("unkonwn tag type")
 	ErrSizeMismatch    = errors.New("data size mismatch")
 	ErrVintOverflow    = errors.New("varint overflows a 64-bit integer")
-
-	flowBuffer = sync.Pool{New: func() any { return &flow.FlowItem{} }}
 )
 
 type FileStorage struct {
@@ -98,109 +92,68 @@ func (f *FileStorage) Close() (err error) {
 	return f.file.Close()
 }
 
-func (f *FileStorage) NewFlowItem() (fl *flow.FlowItem) {
-	fl = flowBuffer.Get().(*flow.FlowItem)
-
-	runtime.SetFinalizer(fl, flowBuffer.Put)
-
-	return fl
-}
-
-func (f *FileStorage) Write(v *flow.FlowItem) error {
+func (f *FileStorage) Write(tid TID, data PersistentData) error {
 	if f.wr == nil {
 		return errors.Wrap(ErrInvalidMode, "can not write to readonly store")
 	}
-	if v == nil {
+	if data == nil {
 		return ErrEmptyData
 	}
 
-	wr := bytes.NewBuffer(make([]byte, 0, defaultBufferLen))
+	v := data.Serialize()
 
-	bufWLen := 0
-
-	if n, err := wr.Write(
-		binary.AppendUvarint(make([]byte, 0, 1), v.Epoch),
+	if n, err := f.wr.Write(
+		binary.AppendVarint(
+			make([]byte, 0, 1),
+			int64(tid)),
 	); err != nil {
-		return errors.Wrap(err, "append epoch failed")
-	} else {
-		bufWLen += n
-	}
-
-	if n, err := wr.Write(
-		binary.AppendUvarint(make([]byte, 0, 1), v.Sequence),
-	); err != nil {
-		return errors.Wrap(err, "append sequence failed")
-	} else {
-		bufWLen += n
-	}
-
-	if n, err := wr.Write(
-		binary.AppendVarint(make([]byte, 0, 1), int64(v.TID)),
-	); err != nil {
-		return errors.Wrap(err, "append tid failed")
-	} else {
-		bufWLen += n
-	}
-
-	data := v.Data.Serialize()
-
-	if n, err := wr.Write(
-		binary.AppendVarint(make([]byte, 0, 1), int64(len(data))),
-	); err != nil {
-		return errors.Wrap(err, "append data len failed")
-	} else {
-		bufWLen += n
-	}
-
-	if n, err := wr.Write(data); err != nil {
-		return errors.Wrap(err, "append data failed")
-	} else {
-		bufWLen += n
-	}
-
-	if n, err := f.file.Write(wr.Bytes()); err != nil {
-		return errors.Wrap(err, "write to file failed")
-	} else if n != bufWLen {
-		return errors.New("buffer write size mismatch with file write")
+		return errors.Wrap(err, "write TID failed")
 	} else {
 		f.wLen += n
 		f.uncommited += n
+	}
+
+	if n, err := f.wr.Write(
+		binary.AppendVarint(
+			make([]byte, 0, 1),
+			int64(len(v))),
+	); err != nil {
+		return errors.Wrap(err, "write data len failed")
+	} else {
+		f.wLen += n
+		f.uncommited += n
+	}
+
+	if n, err := f.wr.Write(v); err != nil {
+		return errors.Wrap(err, "write data failed")
+	} else {
+		f.wLen += n
+		f.uncommited += n
+
 		if f.uncommited >= commitSize {
 			f.uncommited = 0
 			return f.Flush()
 		}
+
 		return nil
 	}
 }
 
-func (f *FileStorage) Read() (*flow.FlowItem, error) {
+func (f *FileStorage) Read() (v PersistentData, err error) {
 	if f.rd == nil {
 		return nil, errors.Wrap(ErrInvalidMode, "can not read from write only store")
 	}
 
-	fl := f.NewFlowItem()
+	var tid int64
 
-	if epoch, err := binary.ReadUvarint(f.rd); err != nil {
-		return nil, errors.Wrap(err, "decode epoch failed")
-	} else {
-		fl.Epoch = epoch
-	}
+	tid, err = binary.ReadVarint(f.rd)
 
-	if seq, err := binary.ReadUvarint(f.rd); err != nil {
-		return nil, errors.Wrap(err, "decode sequence failed")
-	} else {
-		fl.Sequence = seq
-	}
-
-	if tid, err := binary.ReadVarint(f.rd); err != nil {
+	if err != nil {
 		return nil, errors.Wrap(err, "decode TID failed")
-	} else {
-		fl.TID = flow.TID(tid)
 	}
 
-	var err error
-	if fl.Data, err = flow.NewTypeValue(fl.TID); err != nil {
-		return nil, errors.Wrap(err, "create flow data failed")
+	if v, err = NewTypeValue(TID(tid)); err != nil {
+		return nil, errors.Wrap(err, "create data failed")
 	}
 
 	var len int
@@ -211,13 +164,13 @@ func (f *FileStorage) Read() (*flow.FlowItem, error) {
 	}
 
 	data := make([]byte, len)
-	if n, err := io.ReadFull(f.rd, data); err != nil || n != len {
+	if _, err := io.ReadFull(f.rd, data); err != nil {
 		return nil, errors.Wrap(err, "read data payload failed")
 	}
 
-	if err := fl.Data.Deserialize(data); err != nil {
+	if err = v.Deserialize(data); err != nil {
 		return nil, errors.Wrap(err, "parse data payload failed")
 	}
 
-	return fl, nil
+	return
 }

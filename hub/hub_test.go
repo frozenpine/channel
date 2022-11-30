@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/frozenpine/msgqueue/channel"
 )
@@ -60,6 +61,7 @@ func TestMemoHub(t *testing.T) {
 		if err := topicCh.Publish(idx, -1); err != nil {
 			t.Error("publish error:", err)
 		}
+		<-time.After(200 * time.Millisecond)
 	}
 
 	hub.Release()
