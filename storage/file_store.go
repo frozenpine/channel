@@ -2,11 +2,10 @@ package storage
 
 import (
 	"bufio"
-	"encoding/binary"
 	"io"
 	"os"
-	"sync"
 
+	"github.com/frozenpine/msgqueue"
 	"github.com/pkg/errors"
 )
 
@@ -26,8 +25,6 @@ var (
 	ErrUnknownTag      = errors.New("unkonwn tag type")
 	ErrSizeMismatch    = errors.New("data size mismatch")
 	ErrVintOverflow    = errors.New("varint overflows a 64-bit integer")
-
-	vintBuffer = sync.Pool{New: func() any { return make([]byte, 0, 10) }}
 )
 
 type FileStorage struct {
@@ -106,22 +103,15 @@ func (stor *FileStorage) Write(tid TID, data PersistentData) error {
 	}
 
 	v := data.Serialize()
-	buf := vintBuffer.Get().([]byte)
-	defer vintBuffer.Put(buf[:0])
 
-	if n, err := stor.wr.Write(
-		binary.AppendVarint(buf, int64(tid)),
-	); err != nil {
+	if n, err := msgqueue.SerializeVint(tid, stor.wr); err != nil {
 		return errors.Wrap(err, "write TID failed")
 	} else {
 		stor.wrSize += n
 		stor.uncommitSize += n
 	}
 
-	if n, err := stor.wr.Write(
-		// make slice len 0, to prevent predata
-		binary.AppendVarint(buf[:0], int64(len(v))),
-	); err != nil {
+	if n, err := msgqueue.SerializeVint(len(v), stor.wr); err != nil {
 		return errors.Wrap(err, "write data len failed")
 	} else {
 		stor.wrSize += n
@@ -150,26 +140,24 @@ func (stor *FileStorage) Read() (v PersistentData, err error) {
 		return nil, errors.Wrap(ErrInvalidMode, "can not read from write only store")
 	}
 
-	var tid int64
+	var (
+		tid     TID
+		dataLen int
+	)
 
-	tid, err = binary.ReadVarint(stor.rd)
-
-	if err != nil {
+	if tid, err = msgqueue.DeserializeVint[TID](stor.rd); err != nil {
 		return nil, errors.Wrap(err, "decode TID failed")
 	}
 
-	if v, err = NewTypeValue(TID(tid)); err != nil {
+	if v, err = NewTypeValue(tid); err != nil {
 		return nil, errors.Wrap(err, "create data failed")
 	}
 
-	var len int
-	if v, err := binary.ReadVarint(stor.rd); err != nil {
+	if dataLen, err = msgqueue.DeserializeVint[int](stor.rd); err != nil {
 		return nil, errors.Wrap(err, "decode data len failed")
-	} else {
-		len = int(v)
 	}
 
-	data := make([]byte, len)
+	data := make([]byte, dataLen)
 	if _, err := io.ReadFull(stor.rd, data); err != nil {
 		return nil, errors.Wrap(err, "read data payload failed")
 	}

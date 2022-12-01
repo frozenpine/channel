@@ -1,8 +1,11 @@
 package msgqueue
 
 import (
+	"encoding/binary"
 	"errors"
+	"io"
 	"math/rand"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -61,3 +64,49 @@ const (
 	Persistent
 	Remote
 )
+
+var vintBuffer = sync.Pool{New: func() any { return make([]byte, 0, 10) }}
+
+type Int interface {
+	~int8 | ~int16 | ~int | ~int32 | ~int64
+}
+
+type Uint interface {
+	~uint8 | ~uint16 | ~uint | ~uint32 | ~uint64
+}
+
+func SerializeVint[T Int](v T, wr io.Writer) (int, error) {
+	buf := GetVintBuffer()
+
+	result := binary.AppendVarint(buf, int64(v))
+	ReturnVintBuffer(buf)
+
+	return wr.Write(result)
+}
+
+func DeserializeVint[T Int](rd io.ByteReader) (T, error) {
+	v, err := binary.ReadVarint(rd)
+	return T(v), err
+}
+
+func SerializeUVint[T Uint](v T, wr io.Writer) (int, error) {
+	buf := GetVintBuffer()
+
+	result := binary.AppendUvarint(buf, uint64(v))
+	ReturnVintBuffer(buf)
+
+	return wr.Write(result)
+}
+
+func DeserializeUVint[T Uint](rd io.ByteReader) (T, error) {
+	v, err := binary.ReadVarint(rd)
+	return T(v), err
+}
+
+func GetVintBuffer() []byte {
+	return vintBuffer.Get().([]byte)
+}
+
+func ReturnVintBuffer(buf []byte) {
+	vintBuffer.Put(buf[:0])
+}
