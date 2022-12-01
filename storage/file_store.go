@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/pkg/errors"
 )
@@ -14,6 +15,7 @@ const (
 
 	defaultBufferLen = 4096
 	commitSize       = 4096 * 10
+	batchSize        = 100
 )
 
 var (
@@ -24,16 +26,19 @@ var (
 	ErrUnknownTag      = errors.New("unkonwn tag type")
 	ErrSizeMismatch    = errors.New("data size mismatch")
 	ErrVintOverflow    = errors.New("varint overflows a 64-bit integer")
+
+	vintBuffer = sync.Pool{New: func() any { return make([]byte, 0, 10) }}
 )
 
 type FileStorage struct {
-	filePath   string
-	mode       int
-	file       *os.File
-	rd         *bufio.Reader
-	wr         *bufio.Writer
-	wLen       int
-	uncommited int
+	filePath     string
+	mode         int
+	file         *os.File
+	rd           *bufio.Reader
+	wr           *bufio.Writer
+	wrSize       int
+	uncommitSize int
+	batchSize    int
 }
 
 func NewFileStore(path string) *FileStorage {
@@ -44,23 +49,23 @@ func NewFileStore(path string) *FileStorage {
 	return &store
 }
 
-func (f *FileStorage) Open(mode int) (err error) {
-	if f.file != nil {
+func (stor *FileStorage) Open(mode int) (err error) {
+	if stor.file != nil {
 		return ErrFSAlreadyOpened
 	}
 
-	f.file, err = os.OpenFile(f.filePath, mode, os.ModePerm)
+	stor.file, err = os.OpenFile(stor.filePath, mode, os.ModePerm)
 
-	f.mode = mode
+	stor.mode = mode
 
-	switch f.mode & (os.O_RDONLY | os.O_WRONLY | os.O_RDWR) {
+	switch stor.mode & (os.O_RDONLY | os.O_WRONLY | os.O_RDWR) {
 	case os.O_RDONLY:
-		f.rd = bufio.NewReaderSize(f.file, defaultBufferLen)
+		stor.rd = bufio.NewReaderSize(stor.file, defaultBufferLen)
 	case os.O_WRONLY:
-		f.wr = bufio.NewWriterSize(f.file, defaultBufferLen)
+		stor.wr = bufio.NewWriterSize(stor.file, defaultBufferLen)
 	case os.O_RDWR:
-		f.rd = bufio.NewReaderSize(f.file, defaultBufferLen)
-		f.wr = bufio.NewWriterSize(f.file, defaultBufferLen)
+		stor.rd = bufio.NewReaderSize(stor.file, defaultBufferLen)
+		stor.wr = bufio.NewWriterSize(stor.file, defaultBufferLen)
 	default:
 
 	}
@@ -68,32 +73,32 @@ func (f *FileStorage) Open(mode int) (err error) {
 	return
 }
 
-func (f *FileStorage) Flush() error {
-	if f.file == nil {
+func (stor *FileStorage) Flush() error {
+	if stor.file == nil {
 		return ErrFSAlreadyClosed
 	}
 
-	if f.wr != nil {
-		return f.wr.Flush()
+	if stor.wr != nil {
+		return stor.file.Sync()
 	}
 
 	return nil
 }
 
-func (f *FileStorage) Close() (err error) {
-	if f.file == nil {
+func (stor *FileStorage) Close() (err error) {
+	if stor.file == nil {
 		return ErrFSAlreadyClosed
 	}
 
-	if err = f.Flush(); err != nil {
+	if err = stor.Flush(); err != nil {
 		return
 	}
 
-	return f.file.Close()
+	return stor.file.Close()
 }
 
-func (f *FileStorage) Write(tid TID, data PersistentData) error {
-	if f.wr == nil {
+func (stor *FileStorage) Write(tid TID, data PersistentData) error {
+	if stor.wr == nil {
 		return errors.Wrap(ErrInvalidMode, "can not write to readonly store")
 	}
 	if data == nil {
@@ -101,52 +106,53 @@ func (f *FileStorage) Write(tid TID, data PersistentData) error {
 	}
 
 	v := data.Serialize()
+	buf := vintBuffer.Get().([]byte)
+	defer vintBuffer.Put(buf[:0])
 
-	if n, err := f.wr.Write(
-		binary.AppendVarint(
-			make([]byte, 0, 1),
-			int64(tid)),
+	if n, err := stor.wr.Write(
+		binary.AppendVarint(buf, int64(tid)),
 	); err != nil {
 		return errors.Wrap(err, "write TID failed")
 	} else {
-		f.wLen += n
-		f.uncommited += n
+		stor.wrSize += n
+		stor.uncommitSize += n
 	}
 
-	if n, err := f.wr.Write(
-		binary.AppendVarint(
-			make([]byte, 0, 1),
-			int64(len(v))),
+	if n, err := stor.wr.Write(
+		// make slice len 0, to prevent predata
+		binary.AppendVarint(buf[:0], int64(len(v))),
 	); err != nil {
 		return errors.Wrap(err, "write data len failed")
 	} else {
-		f.wLen += n
-		f.uncommited += n
+		stor.wrSize += n
+		stor.uncommitSize += n
 	}
 
-	if n, err := f.wr.Write(v); err != nil {
+	if n, err := stor.wr.Write(v); err != nil {
 		return errors.Wrap(err, "write data failed")
 	} else {
-		f.wLen += n
-		f.uncommited += n
+		stor.wrSize += n
+		stor.uncommitSize += n
+		stor.batchSize++
 
-		if f.uncommited >= commitSize {
-			f.uncommited = 0
-			return f.Flush()
+		if stor.uncommitSize >= commitSize || stor.batchSize >= batchSize {
+			stor.uncommitSize = 0
+			stor.batchSize = 0
+			return stor.Flush()
 		}
 
-		return nil
+		return stor.wr.Flush()
 	}
 }
 
-func (f *FileStorage) Read() (v PersistentData, err error) {
-	if f.rd == nil {
+func (stor *FileStorage) Read() (v PersistentData, err error) {
+	if stor.rd == nil {
 		return nil, errors.Wrap(ErrInvalidMode, "can not read from write only store")
 	}
 
 	var tid int64
 
-	tid, err = binary.ReadVarint(f.rd)
+	tid, err = binary.ReadVarint(stor.rd)
 
 	if err != nil {
 		return nil, errors.Wrap(err, "decode TID failed")
@@ -157,14 +163,14 @@ func (f *FileStorage) Read() (v PersistentData, err error) {
 	}
 
 	var len int
-	if v, err := binary.ReadVarint(f.rd); err != nil {
+	if v, err := binary.ReadVarint(stor.rd); err != nil {
 		return nil, errors.Wrap(err, "decode data len failed")
 	} else {
 		len = int(v)
 	}
 
 	data := make([]byte, len)
-	if _, err := io.ReadFull(f.rd, data); err != nil {
+	if _, err := io.ReadFull(stor.rd, data); err != nil {
 		return nil, errors.Wrap(err, "read data payload failed")
 	}
 

@@ -58,14 +58,6 @@ func NewTypeValue(tid TID) (PersistentData, error) {
 	return data, nil
 }
 
-func ReturnTypeValue(tid TID, v PersistentData) {
-	if tid < 0 || int(tid) >= len(typeList) {
-		return
-	}
-
-	typeList[tid].Put(v)
-}
-
 type BaseStorage interface {
 	Open(int) error
 	Close() error

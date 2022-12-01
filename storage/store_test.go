@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strconv"
 	"testing"
 
 	"github.com/frozenpine/msgqueue/storage"
@@ -188,7 +189,7 @@ func BenchmarkFileStoreWR(b *testing.B) {
 	b.ResetTimer()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		v.name = "testtest"
+		v.name = "testtest" + strconv.Itoa(i)
 		v.data.int = i
 
 		if err := store.Write(tid, &v); err != nil {
