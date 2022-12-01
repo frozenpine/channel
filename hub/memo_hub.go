@@ -5,8 +5,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/frozenpine/msgqueue"
 	"github.com/frozenpine/msgqueue/channel"
+	"github.com/frozenpine/msgqueue/core"
 	"github.com/gofrs/uuid"
 )
 
@@ -30,7 +30,7 @@ func NewMemoHub(ctx context.Context, name string, bufSize int) *MemoHub {
 	}
 
 	if name == "" {
-		name = msgqueue.GenName()
+		name = core.GenName()
 	}
 
 	hub := MemoHub{}
@@ -39,7 +39,7 @@ func NewMemoHub(ctx context.Context, name string, bufSize int) *MemoHub {
 		hub.runCtx, hub.cancelFn = context.WithCancel(ctx)
 
 		hub.chanLen = bufSize
-		hub.id = msgqueue.GenID(name)
+		hub.id = core.GenID(name)
 		hub.name = name
 	})
 
@@ -54,8 +54,8 @@ func (hub *MemoHub) Name() string {
 	return hub.name
 }
 
-func (hub *MemoHub) Type() msgqueue.Type {
-	return msgqueue.Memory
+func (hub *MemoHub) Type() core.Type {
+	return core.Memory
 }
 
 func (hub *MemoHub) Release() {
@@ -105,7 +105,7 @@ func (hub *MemoHub) createTopicChannel(topic string, fn ChannelCreateWrapper) (c
 	}
 
 	if ch, err := fn(
-		context.WithValue(hub.runCtx, msgqueue.CtxQueueType, msgqueue.Memory),
+		context.WithValue(hub.runCtx, core.CtxQueueType, core.Memory),
 		hub.name+"."+topic,
 		hub.chanLen,
 	); err != nil {

@@ -4,8 +4,8 @@ import (
 	"context"
 	originErr "errors"
 
-	"github.com/frozenpine/msgqueue"
 	"github.com/frozenpine/msgqueue/channel"
+	"github.com/frozenpine/msgqueue/core"
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
 )
@@ -24,7 +24,7 @@ type ChannelCreateWrapper func(context.Context, string, int) (channel.BaseChan, 
 type Hub interface {
 	ID() uuid.UUID
 	Name() string
-	Type() msgqueue.Type
+	Type() core.Type
 	Release()
 	Join()
 	Topics() []string

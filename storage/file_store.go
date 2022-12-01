@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/frozenpine/msgqueue"
+	"github.com/frozenpine/msgqueue/core"
 	"github.com/pkg/errors"
 )
 
@@ -104,14 +104,14 @@ func (stor *FileStorage) Write(tid TID, data PersistentData) error {
 
 	v := data.Serialize()
 
-	if n, err := msgqueue.SerializeVint(tid, stor.wr); err != nil {
+	if n, err := core.SerializeVint(tid, stor.wr); err != nil {
 		return errors.Wrap(err, "write TID failed")
 	} else {
 		stor.wrSize += n
 		stor.uncommitSize += n
 	}
 
-	if n, err := msgqueue.SerializeVint(len(v), stor.wr); err != nil {
+	if n, err := core.SerializeVint(len(v), stor.wr); err != nil {
 		return errors.Wrap(err, "write data len failed")
 	} else {
 		stor.wrSize += n
@@ -145,7 +145,7 @@ func (stor *FileStorage) Read() (v PersistentData, err error) {
 		dataLen int
 	)
 
-	if tid, err = msgqueue.DeserializeVint[TID](stor.rd); err != nil {
+	if tid, err = core.DeserializeVint[TID](stor.rd); err != nil {
 		return nil, errors.Wrap(err, "decode TID failed")
 	}
 
@@ -153,7 +153,7 @@ func (stor *FileStorage) Read() (v PersistentData, err error) {
 		return nil, errors.Wrap(err, "create data failed")
 	}
 
-	if dataLen, err = msgqueue.DeserializeVint[int](stor.rd); err != nil {
+	if dataLen, err = core.DeserializeVint[int](stor.rd); err != nil {
 		return nil, errors.Wrap(err, "decode data len failed")
 	}
 

@@ -1,4 +1,4 @@
-package msgqueue
+package core
 
 import (
 	"encoding/binary"

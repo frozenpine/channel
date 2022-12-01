@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/frozenpine/msgqueue"
+	"github.com/frozenpine/msgqueue/core"
 	"github.com/gofrs/uuid"
 )
 
@@ -51,20 +51,20 @@ type Channel[T any] interface {
 }
 
 func NewChannel[T any](ctx context.Context, name string, bufSize int) (Channel[T], error) {
-	var typ msgqueue.Type = msgqueue.Memory
+	var typ core.Type = core.Memory
 
 	if ctx == nil {
 		ctx = context.Background()
-	} else if v := ctx.Value(msgqueue.CtxQueueType); v != nil {
-		if t, ok := v.(msgqueue.Type); ok {
+	} else if v := ctx.Value(core.CtxQueueType); v != nil {
+		if t, ok := v.(core.Type); ok {
 			typ = t
 		}
 	}
 
 	switch typ {
-	case msgqueue.Memory:
+	case core.Memory:
 		return NewMemoChannel[T](ctx, name, bufSize), nil
 	}
 
-	return nil, msgqueue.ErrInvalidType
+	return nil, core.ErrInvalidType
 }

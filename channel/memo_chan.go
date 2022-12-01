@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/frozenpine/msgqueue"
+	"github.com/frozenpine/msgqueue/core"
 	"github.com/gofrs/uuid"
 )
 
@@ -58,7 +58,7 @@ func (ch *MemoChannel[T]) init(ctx context.Context, name string, bufSize int, ex
 	}
 
 	if name == "" {
-		name = msgqueue.GenName()
+		name = core.GenName()
 	}
 
 	if bufSize <= 0 {
@@ -68,7 +68,7 @@ func (ch *MemoChannel[T]) init(ctx context.Context, name string, bufSize int, ex
 	ch.initOnce.Do(func() {
 		ch.runCtx, ch.cancelFn = context.WithCancel(ctx)
 		ch.name = name
-		ch.id = msgqueue.GenID(name)
+		ch.id = core.GenID(name)
 		ch.chanLen = bufSize
 		ch.input = ch.makeChan()
 		ch.waitInfinite = make(chan time.Time)
@@ -193,7 +193,7 @@ func (ch *MemoChannel[T]) inputDispatcher() {
 }
 
 func (ch *MemoChannel[T]) Subscribe(name string, resumeType ResumeType) (uuid.UUID, <-chan T) {
-	subID := msgqueue.GenID(name)
+	subID := core.GenID(name)
 
 	subData, subExist := ch.subscriberCache.LoadOrStore(subID, &sub[T]{data: ch.makeChan()})
 
