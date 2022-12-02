@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/frozenpine/msgqueue/channel"
+	"github.com/frozenpine/msgqueue/core"
 )
 
 func TestMemoHub(t *testing.T) {
@@ -42,7 +42,7 @@ func TestMemoHub(t *testing.T) {
 
 		t.Log(topicCh.Name(), topicCh.ID(), err)
 
-		subID, data := topicCh.Subscribe("test1", channel.Quick)
+		subID, data := topicCh.Subscribe("test1", core.Quick)
 
 		t.Logf("channel sub id: %+v", subID)
 

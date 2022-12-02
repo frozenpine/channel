@@ -192,7 +192,7 @@ func (ch *MemoChannel[T]) inputDispatcher() {
 	}
 }
 
-func (ch *MemoChannel[T]) Subscribe(name string, resumeType ResumeType) (uuid.UUID, <-chan T) {
+func (ch *MemoChannel[T]) Subscribe(name string, resumeType core.ResumeType) (uuid.UUID, <-chan T) {
 	subID := core.GenID(name)
 
 	subData, subExist := ch.subscriberCache.LoadOrStore(subID, &sub[T]{data: ch.makeChan()})
@@ -258,7 +258,7 @@ func (ch *MemoChannel[T]) PipelineUpStream(src Channel[T]) error {
 		return ErrPipeline
 	}
 
-	subID, subCh := src.Subscribe(ch.name, Quick)
+	subID, subCh := src.Subscribe(ch.name, core.Quick)
 	if _, exist := ch.upstreamCache.LoadOrStore(subID, src); !exist {
 		ch.upstreamWg.Add(1)
 

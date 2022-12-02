@@ -75,13 +75,24 @@ type Uint interface {
 	~uint8 | ~uint16 | ~uint | ~uint32 | ~uint64
 }
 
-func SerializeVint[T Int](v T, wr io.Writer) (int, error) {
+func SerializeVint[T Int](v T, wr io.ByteWriter) (int, error) {
 	buf := GetVintBuffer()
 
 	result := binary.AppendVarint(buf, int64(v))
 	ReturnVintBuffer(buf)
 
-	return wr.Write(result)
+	var (
+		n   int
+		b   byte
+		err error
+	)
+	for n, b = range result {
+		if err = wr.WriteByte(b); err != nil {
+			return n + 1, err
+		}
+	}
+
+	return n + 1, err
 }
 
 func DeserializeVint[T Int](rd io.ByteReader) (T, error) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/frozenpine/msgqueue/channel"
+	"github.com/frozenpine/msgqueue/core"
 )
 
 func TestChanType(t *testing.T) {
@@ -32,7 +33,7 @@ func TestMemoCh(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 
-			subID, subCh := ch.Subscribe(strconv.Itoa(idx), channel.Quick)
+			subID, subCh := ch.Subscribe(strconv.Itoa(idx), core.Quick)
 
 			t.Logf("subscriber[%d]: %v", idx, subID)
 

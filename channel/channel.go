@@ -3,7 +3,6 @@ package channel
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/frozenpine/msgqueue/core"
 	"github.com/gofrs/uuid"
@@ -24,14 +23,6 @@ var (
 	ChannelTypeKey = "HubType"
 )
 
-type ResumeType uint8
-
-const (
-	Restart ResumeType = iota
-	Resume
-	Quick
-)
-
 type BaseChan interface {
 	ID() uuid.UUID
 	Name() string
@@ -43,9 +34,9 @@ type BaseChan interface {
 
 type Channel[T any] interface {
 	BaseChan
-	Subscribe(name string, resumeType ResumeType) (uuid.UUID, <-chan T)
-	UnSubscribe(subID uuid.UUID) error
-	Publish(v T, timeout time.Duration) error
+	core.Consumer[T]
+	core.Producer[T]
+
 	PipelineDownStream(dst Channel[T]) (Channel[T], error)
 	PipelineUpStream(src Channel[T]) error
 }
