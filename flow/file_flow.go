@@ -3,11 +3,11 @@ package flow
 import (
 	"os"
 
+	"github.com/frozenpine/msgqueue/chanio"
 	"github.com/frozenpine/msgqueue/core"
-	"github.com/frozenpine/msgqueue/storage"
 )
 
-type FileFlow[T storage.PersistentData] struct {
+type FileFlow[T chanio.PersistentData] struct {
 	flowDIR os.DirEntry
 
 	flowCache *core.RBTree
@@ -16,6 +16,6 @@ type FileFlow[T storage.PersistentData] struct {
 	flowSeq   uint64
 }
 
-func NewFileFlow[T storage.PersistentData](dir string) *FileFlow[T] {
+func NewFileFlow[T chanio.PersistentData](dir string) *FileFlow[T] {
 	return &FileFlow[T]{}
 }

@@ -1,9 +1,14 @@
 package pipeline
 
 import (
+	"log"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/frozenpine/msgqueue/channel"
+	"github.com/frozenpine/msgqueue/core"
 )
 
 var (
@@ -11,12 +16,13 @@ var (
 )
 
 type Trade interface {
+	InvestorID() string
+	ExchangeID() string
+	InstrumentID() string
 	Price() float64
 	Volume() int
 	TradeID() string
 	TradeTime() time.Time
-
-	Data[Trade]
 }
 
 type TradeSequence struct {
@@ -46,36 +52,12 @@ func (td *TradeSequence) Value() Trade {
 	return td.data
 }
 
-func (td *TradeSequence) IsSame(right Sequence[time.Time, Trade]) bool {
-	if td.IsWaterMark() || right.IsWaterMark() {
-		return td.ts.Equal(right.Index())
+func (td *TradeSequence) Compare(than Sequence[time.Time, Trade]) int {
+	if td.IsWaterMark() || than.IsWaterMark() {
+		return core.TimeCompare(td.ts, than.Index())
 	}
 
-	return td.data.TradeID() == right.Value().TradeID()
-}
-
-func (td *TradeSequence) IsBefore(right Sequence[time.Time, Trade]) bool {
-	if td.IsWaterMark() || right.IsWaterMark() {
-		return td.ts.Before(right.Index())
-	}
-
-	return td.data.TradeID() < right.Value().TradeID()
-}
-
-func (td *TradeSequence) IsAfter(right Sequence[time.Time, Trade]) bool {
-	if td.IsWaterMark() || right.IsWaterMark() {
-		return td.ts.After(right.Index())
-	}
-
-	return td.data.TradeID() > right.Value().TradeID()
-}
-
-func (td *TradeSequence) IsSameOrBefore(right Sequence[time.Time, Trade]) bool {
-	return td.IsSame(right) || td.IsBefore(right)
-}
-
-func (td *TradeSequence) IsSameOrAfter(right Sequence[time.Time, Trade]) bool {
-	return td.IsSame(right) || td.IsAfter(right)
+	return strings.Compare(td.data.TradeID(), than.Value().TradeID())
 }
 
 func (td *TradeSequence) IsWaterMark() bool {
@@ -89,6 +71,25 @@ type KBar struct {
 	Close Trade
 }
 
-type KBarChan[S any, V Data[V]] struct {
-	buffer []Sequence[S, V]
+type SequenceSlice[S comparable, V any] []Sequence[S, V]
+
+type KBarChan struct {
+	buffer     SequenceSlice[time.Time, Trade]
+	inputChan  channel.Channel[Trade]
+	outputChan channel.Channel[*KBar]
+}
+
+func (ch *KBarChan) dispatcher() {
+	subID, in := ch.inputChan.Subscribe("kbar", core.Quick)
+
+	log.Printf("Start trade consumer[kbar]: %v", subID)
+
+	for v := range in {
+		tdSeq := NewTradeSequence(v)
+		if tdSeq.IsWaterMark() {
+			// TODO: aggreate
+		} else {
+			ch.buffer = append(ch.buffer, tdSeq)
+		}
+	}
 }

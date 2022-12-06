@@ -121,3 +121,16 @@ func GetVintBuffer() []byte {
 func ReturnVintBuffer(buf []byte) {
 	vintBuffer.Put(buf[:0])
 }
+
+func TimeCompare(l, r time.Time) int {
+	gap := l.Nanosecond() - r.Nanosecond()
+
+	switch {
+	case gap > 0:
+		return 1
+	case gap < 0:
+		return -1
+	default:
+		return 0
+	}
+}

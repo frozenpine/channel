@@ -1,14 +1,14 @@
 package flow
 
 import (
+	"github.com/frozenpine/msgqueue/chanio"
 	"github.com/frozenpine/msgqueue/core"
-	"github.com/frozenpine/msgqueue/storage"
 )
 
 type FlowItem struct {
 	Epoch    uint64
 	Sequence uint64
-	Data     storage.PersistentData
+	Data     chanio.PersistentData
 }
 
 func (v *FlowItem) Less(than core.Item) bool {
@@ -35,7 +35,7 @@ type BaseFlow interface {
 	TotalDataSize() uint64
 }
 
-type Flow[T storage.PersistentData] interface {
+type Flow[T chanio.PersistentData] interface {
 	BaseFlow
 
 	Write(data T) (seq uint64, err error)
