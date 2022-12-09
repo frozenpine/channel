@@ -1,6 +1,12 @@
 package pipeline
 
-import "github.com/frozenpine/msgqueue/channel"
+import (
+	"github.com/frozenpine/msgqueue/core"
+)
+
+type WaterMark interface {
+	IsWaterMark() bool
+}
 
 type Sequence[S, V any] interface {
 	Value() V
@@ -8,13 +14,19 @@ type Sequence[S, V any] interface {
 
 	Compare(than Sequence[S, V]) int
 
-	IsWaterMark() bool
+	WaterMark
 }
 
-type Aggregatorable[S, V any] interface {
-	WindowBy(<-chan Sequence[S, V]) <-chan Aggregatorable[S, V]
-	FilterBy(func(Sequence[S, V]) bool) Aggregatorable[S, V]
-	GroupBy(func(Sequence[S, V]) any) map[any]Aggregatorable[S, V]
+type Aggregatorable[
+	IS, IV any,
+	OS, OV any,
+	KEY comparable,
+] interface {
+	WindowBy(<-chan WaterMark) <-chan Aggregatorable[IS, IV, OS, OV, KEY]
+	FilterBy(func(Sequence[IS, IV]) bool) Aggregatorable[IS, IV, OS, OV, KEY]
+	GroupBy(func(Sequence[IS, IV]) KEY) map[KEY]Aggregatorable[IS, IV, OS, OV, KEY]
+	Action(func([]Sequence[IS, IV]) Sequence[OS, OV])
 
-	channel.Channel[V]
+	core.Producer[Sequence[IS, IV]]
+	core.Consumer[Sequence[OS, OV]]
 }
