@@ -123,7 +123,7 @@ func ReturnVintBuffer(buf []byte) {
 }
 
 func TimeCompare(l, r time.Time) int {
-	gap := l.Nanosecond() - r.Nanosecond()
+	gap := l.UnixNano() - r.UnixNano()
 
 	switch {
 	case gap > 0:
