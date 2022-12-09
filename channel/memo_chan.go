@@ -9,6 +9,7 @@ import (
 
 	"github.com/frozenpine/msgqueue/core"
 	"github.com/gofrs/uuid"
+	"github.com/pkg/errors"
 )
 
 type sub[T any] struct {
@@ -58,7 +59,7 @@ func (ch *MemoChannel[T]) init(ctx context.Context, name string, bufSize int, ex
 	}
 
 	if name == "" {
-		name = core.GenName()
+		name = core.GenName("MemoChan")
 	}
 
 	if bufSize <= 0 {
@@ -211,7 +212,7 @@ func (ch *MemoChannel[T]) UnSubscribe(subID uuid.UUID) error {
 	subData, subExist := ch.subscriberCache.LoadAndDelete(subID)
 
 	if !subExist {
-		return ErrNoSubcriber
+		return core.ErrNoSubcriber
 	}
 
 	subData.(*sub[T]).close()
@@ -233,29 +234,27 @@ func (ch *MemoChannel[T]) Publish(v T, timeout time.Duration) error {
 	case <-ch.runCtx.Done():
 		return ErrChanClosed
 	case <-ch.timeout(timeout):
-		return ErrPubTimeout
+		return core.ErrPubTimeout
 	case ch.input <- v:
 		return nil
 	}
 }
 
-func (ch *MemoChannel[T]) PipelineDownStream(dst Channel[T]) (Channel[T], error) {
+func (ch *MemoChannel[T]) PipelineDownStream(dst core.Upstream[T]) error {
 	if dst == nil {
-		dst = NewMemoChannel[T](context.Background(), "", ch.chanLen)
+		return errors.Wrap(core.ErrPipeline, "empty down stream")
 	}
 
-	dst.PipelineUpStream(ch)
-
-	return dst, nil
+	return dst.PipelineUpStream(ch)
 }
 
-func (ch *MemoChannel[T]) makeUpstreamIdentity(src Channel[T], subID uuid.UUID) string {
+func (ch *MemoChannel[T]) makeUpstreamIdentity(src core.QueueBase, subID uuid.UUID) string {
 	return strings.Join([]string{src.Name(), subID.String()}, upstreamIdtSep)
 }
 
-func (ch *MemoChannel[T]) PipelineUpStream(src Channel[T]) error {
+func (ch *MemoChannel[T]) PipelineUpStream(src core.Consumer[T]) error {
 	if src == nil {
-		return ErrPipeline
+		return errors.Wrap(core.ErrPipeline, "upstream empty")
 	}
 
 	subID, subCh := src.Subscribe(ch.name, core.Quick)
@@ -275,7 +274,7 @@ func (ch *MemoChannel[T]) PipelineUpStream(src Channel[T]) error {
 			}
 		}()
 	} else {
-		return ErrAlreadySubscribed
+		return core.ErrAlreadySubscribed
 	}
 
 	return nil

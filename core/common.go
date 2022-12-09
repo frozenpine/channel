@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -14,7 +15,7 @@ import (
 
 func GenID(name string) uuid.UUID {
 	if name == "" {
-		name = GenName()
+		name = GenName("")
 	}
 
 	return uuid.NewV5(uuid.NamespaceDNS, name)
@@ -34,7 +35,7 @@ var (
 	src = rand.NewSource(time.Now().UnixNano())
 )
 
-func GenName() string {
+func GenName(prefix string) string {
 	b := make([]byte, randNameSize)
 	// A rand.Int63() generates 63 random bits, enough for letterIdMax letters!
 	for i, cache, remain := randNameSize-1, src.Int63(), letterIdMax; i >= 0; {
@@ -48,6 +49,14 @@ func GenName() string {
 		cache >>= letterIdBits
 		remain--
 	}
+
+	if prefix != "" {
+		buf := bytes.NewBufferString(prefix)
+		buf.WriteRune('_')
+		buf.WriteString(*(*string)(unsafe.Pointer(&b)))
+		return buf.String()
+	}
+
 	return *(*string)(unsafe.Pointer(&b))
 }
 

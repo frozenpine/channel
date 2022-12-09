@@ -30,7 +30,7 @@ func NewMemoHub(ctx context.Context, name string, bufSize int) *MemoHub {
 	}
 
 	if name == "" {
-		name = core.GenName()
+		name = core.GenName("MemoHub")
 	}
 
 	hub := MemoHub{}

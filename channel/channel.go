@@ -2,10 +2,9 @@ package channel
 
 import (
 	"context"
-	"errors"
 
 	"github.com/frozenpine/msgqueue/core"
-	"github.com/gofrs/uuid"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -14,18 +13,14 @@ const (
 )
 
 var (
-	ErrNoSubcriber       = errors.New("no subscriber")
-	ErrChanClosed        = errors.New("channel closed")
-	ErrPubTimeout        = errors.New("pub timeout")
-	ErrPipeline          = errors.New("pipeline upstream is nil")
-	ErrAlreadySubscribed = errors.New("already subscribed")
+	ErrChanClosed = errors.New("channel closed")
 
 	ChannelTypeKey = "HubType"
 )
 
 type BaseChan interface {
-	ID() uuid.UUID
-	Name() string
+	core.QueueBase
+
 	Release()
 	Join()
 
@@ -36,9 +31,8 @@ type Channel[T any] interface {
 	BaseChan
 	core.Consumer[T]
 	core.Producer[T]
-
-	PipelineDownStream(dst Channel[T]) (Channel[T], error)
-	PipelineUpStream(src Channel[T]) error
+	core.Upstream[T]
+	core.Downstream[T]
 }
 
 func NewChannel[T any](ctx context.Context, name string, bufSize int) (Channel[T], error) {

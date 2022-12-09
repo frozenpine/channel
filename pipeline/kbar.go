@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"log"
 	"runtime"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/frozenpine/msgqueue/channel"
 	"github.com/frozenpine/msgqueue/core"
+	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -22,19 +24,16 @@ var (
 )
 
 type Trade interface {
-	InvestorID() string
-	ExchangeID() string
-	InstrumentID() string
+	// 必须单调有序
+	Identity() string
 	Price() float64
 	Volume() int
-	TradeID() string
 	TradeTime() time.Time
 }
 
 type TradeSequence struct {
 	Trade
-	watermark bool
-	ts        time.Time
+	ts time.Time
 }
 
 func NewTradeSequence(v Trade) *TradeSequence {
@@ -46,12 +45,6 @@ func NewTradeSequence(v Trade) *TradeSequence {
 	runtime.SetFinalizer(result, tradeSequencePool.Put)
 
 	return result
-}
-
-func NewTradeWarterMark(v Trade) *TradeSequence {
-	td := NewTradeSequence(v)
-	td.watermark = true
-	return td
 }
 
 func (td *TradeSequence) Index() time.Time {
@@ -67,11 +60,11 @@ func (td *TradeSequence) Compare(than Sequence[time.Time, Trade]) int {
 		return core.TimeCompare(td.ts, than.Index())
 	}
 
-	return strings.Compare(td.Trade.TradeID(), than.Value().TradeID())
+	return strings.Compare(td.Trade.Identity(), than.Value().Identity())
 }
 
 func (td *TradeSequence) IsWaterMark() bool {
-	return td.Trade == nil || td.watermark
+	return td.Trade == nil
 }
 
 type KBar interface {
@@ -109,6 +102,9 @@ func NewKBarSequence(preBar *KBarSequence, preSettle float64) *KBarSequence {
 		bar.index = index
 	}
 
+	// to prevent dirty data in history
+	bar.data = bar.data[:0]
+
 	runtime.SetFinalizer(bar, kbarSequencePool.Put)
 
 	return bar
@@ -120,11 +116,16 @@ func (k *KBarSequence) Push(v Trade) error {
 	}
 
 	if core.TimeCompare(k.index, v.TradeTime()) < 0 {
-		return errors.New("out of sequence range")
+		return errors.Wrap(ErrFutureTick, "trade ts after current bar")
 	}
 
-	k.totalVolume += v.Volume()
+	if core.TimeCompare(k.index.Add(-kbarGap), v.TradeTime()) >= 0 {
+		return errors.Wrap(ErrHistoryTick, "trade ts before current bar")
+	}
+
 	k.data = append(k.data, v)
+
+	k.totalVolume += v.Volume()
 
 	if k.max == nil || v.Price() > k.max.Price() {
 		k.max = v
@@ -198,8 +199,45 @@ func (k *KBarSequence) Compare(than Sequence[time.Time, KBar]) int {
 }
 
 type KBarPipeline struct {
-	inputChan  channel.Channel[Trade]
-	outputChan channel.Channel[*KBar]
+	name     string
+	id       uuid.UUID
+	ctx      context.Context
+	cancelFn context.CancelFunc
+
+	inputChan  channel.Channel[*TradeSequence]
+	outputChan channel.Channel[KBar]
+
+	currBar *KBarSequence
+}
+
+func NewKBarPipeline(ctx context.Context, name string, preSettle float64) *KBarPipeline {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if name == "" {
+		name = core.GenName("KBarPipe")
+	}
+
+	pipe := KBarPipeline{
+		name:    name,
+		id:      core.GenID(name),
+		currBar: NewKBarSequence(nil, preSettle),
+	}
+	pipe.ctx, pipe.cancelFn = context.WithCancel(ctx)
+	pipe.id = core.GenID(pipe.name)
+
+	go pipe.dispatcher()
+
+	return &pipe
+}
+
+func (ch *KBarPipeline) Name() string {
+	return ch.name
+}
+
+func (ch *KBarPipeline) ID() uuid.UUID {
+	return ch.id
 }
 
 func (ch *KBarPipeline) dispatcher() {
@@ -207,10 +245,68 @@ func (ch *KBarPipeline) dispatcher() {
 
 	log.Printf("Start trade consumer[kbar]: %v", subID)
 
-	for v := range in {
-		tdSeq := NewTradeSequence(v)
-		if tdSeq.IsWaterMark() {
-			// TODO: aggreate
+	var err error
+
+	for seq := range in {
+		if err = ch.currBar.Push(seq.Trade); err == nil {
+			continue
+		}
+
+		switch errors.Unwrap(err) {
+		case ErrFutureTick:
+			ch.outputChan.Publish(ch.currBar, -1)
+			ch.currBar = NewKBarSequence(ch.currBar, ch.currBar.preSettle)
+		case ErrHistoryTick:
+			log.Printf("Received history data: %+v, %+v", seq, ch.currBar)
+		default:
+			log.Printf("Unhandled err occoured: %+v", err)
 		}
 	}
+}
+
+func (ch *KBarPipeline) Publish(v Trade, timeout time.Duration) error {
+	return ch.inputChan.Publish(NewTradeSequence(v), timeout)
+}
+
+func (ch *KBarPipeline) Subscribe(name string, resume core.ResumeType) (uuid.UUID, <-chan KBar) {
+	return ch.outputChan.Subscribe(name, resume)
+}
+
+func (ch *KBarPipeline) UnSubscribe(subID uuid.UUID) error {
+	return ch.outputChan.UnSubscribe(subID)
+}
+
+func (ch *KBarPipeline) PipelineUpStream(src core.Consumer[Trade]) error {
+	if src == nil {
+		return errors.Wrap(core.ErrPipeline, "upstream empty")
+	}
+
+	subID, upChan := src.Subscribe(ch.name, core.Quick)
+
+	go func() {
+		defer src.UnSubscribe(subID)
+
+		for {
+			select {
+			case <-ch.ctx.Done():
+				return
+			case td := <-upChan:
+				if td == nil {
+					continue
+				}
+
+				ch.inputChan.Publish(NewTradeSequence(td), -1)
+			}
+		}
+	}()
+
+	return nil
+}
+
+func (ch *KBarPipeline) PipelineDownStream(dst core.Upstream[KBar]) error {
+	if dst == nil {
+		return errors.Wrap(core.ErrPipeline, "empty downstream")
+	}
+
+	return dst.PipelineUpStream(ch)
 }

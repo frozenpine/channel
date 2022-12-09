@@ -12,7 +12,7 @@ import (
 )
 
 func TestChanType(t *testing.T) {
-	memoCh := channel.NewMemoChannel[int](context.TODO(), "test", -1)
+	memoCh := channel.NewMemoChannel[int](context.TODO(), "", -1)
 
 	var ch channel.BaseChan = memoCh
 

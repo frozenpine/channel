@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/frozenpine/msgqueue/core"
+	"github.com/pkg/errors"
 )
 
 func TestSequence(t *testing.T) {
@@ -34,5 +35,13 @@ func TestKBarIndex(t *testing.T) {
 		t.Log(now.Format("2006-01-02 15:04:05.000"), index.Format("2006-01-02 15:04:05.000"))
 
 		<-time.After(time.Millisecond * 500)
+	}
+}
+
+func TestErrCheck(t *testing.T) {
+	err := errors.Wrap(ErrFutureTick, "test")
+
+	if !errors.Is(err, ErrFutureTick) {
+		t.Fatal(err)
 	}
 }
