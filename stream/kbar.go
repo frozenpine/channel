@@ -1,4 +1,4 @@
-package pipeline
+package stream
 
 import (
 	"context"
@@ -55,7 +55,7 @@ func (td *TradeSequence) Value() Trade {
 	return td.Trade
 }
 
-func (td *TradeSequence) Compare(than Sequence[time.Time, Trade]) int {
+func (td *TradeSequence) Compare(than pipeline.Sequence[time.Time, Trade]) int {
 	if td.IsWaterMark() || than.IsWaterMark() {
 		return core.TimeCompare(td.ts, than.Index())
 	}

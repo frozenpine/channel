@@ -27,8 +27,14 @@ type MemoPipeLine[
 func NewMemoPipeLine[
 	IS, IV comparable,
 	OS, OV comparable,
-](ctx context.Context, name string) *MemoPipeLine[IS, IV, OS, OV] {
+](ctx context.Context, name string, converter fn(Sequence[IS,IV])Sequence[]) *MemoPipeLine[IS, IV, OS, OV] {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	pipe := MemoPipeLine[IS, IV, OS, OV]{}
+
+	pipe.runCtx, pipe.cancelFn = context.
 
 	return &pipe
 }
