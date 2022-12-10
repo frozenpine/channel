@@ -21,9 +21,6 @@ var (
 type BaseChan interface {
 	core.QueueBase
 
-	Release()
-	Join()
-
 	init(ctx context.Context, name string, bufSize int, extraInit func())
 }
 

@@ -17,6 +17,8 @@ const (
 type QueueBase interface {
 	ID() uuid.UUID
 	Name() string
+	Release()
+	Join()
 }
 
 type Consumer[T any] interface {

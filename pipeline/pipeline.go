@@ -25,15 +25,8 @@ type Sequence[S, V any] interface {
 	WaterMark
 }
 
-type SequenceSlice[S, V any] interface {
-	Push(d V) error
-}
-
 type BasePipe interface {
 	core.QueueBase
-
-	Release()
-	Join()
 
 	init(ctx context.Context, name string, extraInit func())
 }
@@ -41,23 +34,32 @@ type BasePipe interface {
 type Pipeline[
 	IS, IV comparable,
 	OS, OV comparable,
-	KEY comparable,
 ] interface {
 	BasePipe
-	core.Producer[IV]
-	core.Consumer[OV]
-	core.Upstream[IV]
-	core.Downstream[OV]
+	core.Producer[Sequence[IS, IV]]
+	core.Consumer[Sequence[OS, OV]]
+	core.Upstream[Sequence[IS, IV]]
+	core.Downstream[Sequence[OS, OV]]
 }
 
-type Aggregatorable[
+func NewPipeline[
 	IS, IV comparable,
 	OS, OV comparable,
-	KEY comparable,
-] interface {
-	WindowBy(<-chan WaterMark) Aggregatorable[IS, IV, OS, OV, KEY]
-	FilterBy(func(Sequence[IS, IV]) bool) Aggregatorable[IS, IV, OS, OV, KEY]
-	GroupBy(func(Sequence[IS, IV]) KEY) Aggregatorable[IS, IV, OS, OV, KEY]
-	Action(func(SequenceSlice[IS, IV]) Sequence[OS, OV])
-	GetGroupAggregator(KEY) Aggregatorable[IS, IV, OS, OV, KEY]
+](ctx context.Context, name string) (Pipeline[IS, IV, OS, OV], error) {
+	var typ core.Type = core.Memory
+
+	if ctx == nil {
+		ctx = context.Background()
+	} else if v := ctx.Value(core.CtxQueueType); v != nil {
+		if t, ok := v.(core.Type); ok {
+			typ = t
+		}
+	}
+
+	switch typ {
+	case core.Memory:
+		return NewMemoChannel[T](ctx, name, bufSize), nil
+	}
+
+	return nil, core.ErrInvalidType
 }

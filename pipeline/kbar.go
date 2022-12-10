@@ -308,5 +308,6 @@ func (ch *KBarPipeline) PipelineDownStream(dst core.Upstream[KBar]) error {
 		return errors.Wrap(core.ErrPipeline, "empty downstream")
 	}
 
-	return dst.PipelineUpStream(ch)
+	return nil
+	// return dst.PipelineUpStream(ch)
 }
