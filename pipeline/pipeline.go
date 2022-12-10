@@ -46,7 +46,7 @@ type Pipeline[
 func NewPipeline[
 	IS, IV comparable,
 	OS, OV comparable,
-](ctx context.Context, name string) (Pipeline[IS, IV, OS, OV], error) {
+](ctx context.Context, name string, cvt Converter[IS, IV, OS, OV]) (Pipeline[IS, IV, OS, OV], error) {
 	var typ core.Type = core.Memory
 
 	if ctx == nil {
@@ -59,7 +59,7 @@ func NewPipeline[
 
 	switch typ {
 	case core.Memory:
-		return NewMemoPipeLine[IS, IV, OS, OV](ctx, name, nil), nil
+		return NewMemoPipeLine(ctx, name, cvt), nil
 	}
 
 	return nil, core.ErrInvalidType
