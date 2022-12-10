@@ -8,7 +8,6 @@ import (
 )
 
 const (
-	upstreamIdtSep  = "."
 	defaultChanSize = 1
 )
 

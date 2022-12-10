@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"time"
 
 	"github.com/gofrs/uuid"
@@ -40,4 +41,13 @@ type Upstream[T any] interface {
 type Downstream[T any] interface {
 	QueueBase
 	PipelineDownStream(dst Upstream[T]) error
+}
+
+func QueueIdentity(q QueueBase) string {
+	buf := bytes.NewBufferString(q.Name())
+	buf.WriteRune('[')
+	buf.WriteString(q.ID().String())
+	buf.WriteRune(']')
+
+	return buf.String()
 }

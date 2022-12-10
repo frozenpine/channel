@@ -3,7 +3,6 @@ package channel
 import (
 	"context"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
@@ -54,19 +53,19 @@ func NewMemoChannel[T any](ctx context.Context, name string, bufSize int) *MemoC
 }
 
 func (ch *MemoChannel[T]) init(ctx context.Context, name string, bufSize int, extraInit func()) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	if name == "" {
-		name = core.GenName("MemoChan")
-	}
-
-	if bufSize <= 0 {
-		bufSize = defaultChanSize
-	}
-
 	ch.initOnce.Do(func() {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		if name == "" {
+			name = core.GenName("MemoChan")
+		}
+
+		if bufSize <= 0 {
+			bufSize = defaultChanSize
+		}
+
 		ch.runCtx, ch.cancelFn = context.WithCancel(ctx)
 		ch.name = name
 		ch.id = core.GenID(name)
@@ -105,33 +104,21 @@ func (ch *MemoChannel[T]) Release() {
 
 func (ch *MemoChannel[T]) disconnectUpstream() {
 	ch.upstreamCache.Range(func(key, value any) bool {
-		upstreamIdentity, ok := key.(string)
+		subID, ok := key.(uuid.UUID)
+
 		if !ok {
-			log.Printf("Invalid upstream identity: %v", key)
+			log.Printf("Invalid upstream subID: %v", key)
 			return true
 		}
 
-		src, ok := value.(*MemoChannel[T])
+		upstream, ok := value.(core.Consumer[T])
 		if !ok {
-			log.Printf("Invalid upstream source: %v, %v", upstreamIdentity, value)
+			log.Printf("Invalid upstream source: %v", value)
 			return true
 		}
 
-		idtList := strings.Split(upstreamIdentity, upstreamIdtSep)
-		if len(idtList) != 2 {
-			log.Printf("Invalid upstream identity: %v", upstreamIdentity)
-			return true
-		}
-
-		srcName := idtList[0]
-		subID, _ := uuid.FromString(idtList[1])
-
-		if srcName != src.Name() {
-			log.Printf("Parsed upstream name[%s] mismatch with source: %s", srcName, src.ID())
-		}
-
-		if err := src.UnSubscribe(subID); err != nil {
-			log.Printf("UnSubscribe from upstream[%s] failed: %v", src.ID(), err)
+		if err := upstream.UnSubscribe(subID); err != nil {
+			log.Printf("UnSubscribe from upstream[%s] failed: %v", upstream.ID(), err)
 		}
 
 		return true
@@ -248,10 +235,6 @@ func (ch *MemoChannel[T]) PipelineDownStream(dst core.Upstream[T]) error {
 	return dst.PipelineUpStream(ch)
 }
 
-func (ch *MemoChannel[T]) makeUpstreamIdentity(src core.QueueBase, subID uuid.UUID) string {
-	return strings.Join([]string{src.Name(), subID.String()}, upstreamIdtSep)
-}
-
 func (ch *MemoChannel[T]) PipelineUpStream(src core.Consumer[T]) error {
 	if src == nil {
 		return errors.Wrap(core.ErrPipeline, "upstream empty")
@@ -264,12 +247,21 @@ func (ch *MemoChannel[T]) PipelineUpStream(src core.Consumer[T]) error {
 		go func() {
 			defer ch.upstreamWg.Done()
 
-			for v := range subCh {
-				if err := ch.Publish(v, -1); err != nil {
-					log.Printf(
-						"Relay pipeline upstream[%s] failed: %+v",
-						ch.makeUpstreamIdentity(src, subID), err,
-					)
+			for {
+				select {
+				case <-ch.runCtx.Done():
+					return
+				case v, ok := <-subCh:
+					if !ok {
+						return
+					}
+
+					if err := ch.Publish(v, -1); err != nil {
+						log.Printf(
+							"Relay pipeline upstream %s failed: %+v",
+							core.QueueIdentity(src), err,
+						)
+					}
 				}
 			}
 		}()
