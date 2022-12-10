@@ -10,6 +10,7 @@ import (
 
 	"github.com/frozenpine/msgqueue/channel"
 	"github.com/frozenpine/msgqueue/core"
+	"github.com/frozenpine/msgqueue/pipeline"
 	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
 )
@@ -194,7 +195,7 @@ func (k *KBarSequence) IsWarterMark() bool {
 	return k.index.UnixMilli()%500 == 0
 }
 
-func (k *KBarSequence) Compare(than Sequence[time.Time, KBar]) int {
+func (k *KBarSequence) Compare(than pipeline.Sequence[time.Time, KBar]) int {
 	return core.TimeCompare(k.index, than.Index())
 }
 

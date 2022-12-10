@@ -4,12 +4,6 @@ import (
 	"context"
 
 	"github.com/frozenpine/msgqueue/core"
-	"github.com/pkg/errors"
-)
-
-var (
-	ErrFutureTick  = errors.New("future tick")
-	ErrHistoryTick = errors.New("history tick")
 )
 
 type WaterMark interface {
@@ -29,6 +23,13 @@ type BasePipe interface {
 	core.QueueBase
 
 	init(ctx context.Context, name string, extraInit func())
+}
+
+type Converter[
+	IS, IV comparable,
+	OS, OV comparable,
+] interface {
+	Convert(Sequence[IS, IV]) Sequence[OS, OV]
 }
 
 type Pipeline[
@@ -58,7 +59,7 @@ func NewPipeline[
 
 	switch typ {
 	case core.Memory:
-		return NewMemoPipeLine[IS, IV, OS, OV](ctx, name), nil
+		return NewMemoPipeLine[IS, IV, OS, OV](ctx, name, nil), nil
 	}
 
 	return nil, core.ErrInvalidType

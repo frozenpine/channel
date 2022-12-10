@@ -22,19 +22,28 @@ type MemoPipeLine[
 
 	inputChan  channel.Channel[Sequence[IS, IV]]
 	outputChan channel.Channel[Sequence[OS, OV]]
+
+	converter Converter[IS, IV, OS, OV]
 }
 
 func NewMemoPipeLine[
 	IS, IV comparable,
 	OS, OV comparable,
-](ctx context.Context, name string, converter fn(Sequence[IS,IV])Sequence[]) *MemoPipeLine[IS, IV, OS, OV] {
+](ctx context.Context, name string, converter Converter[IS, IV, OS, OV]) *MemoPipeLine[IS, IV, OS, OV] {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	pipe := MemoPipeLine[IS, IV, OS, OV]{}
+	if name == "" {
+		name = core.GenName("MemoPipeline")
+	}
 
-	pipe.runCtx, pipe.cancelFn = context.
+	pipe := MemoPipeLine[IS, IV, OS, OV]{
+		name: name,
+		id: core.GenID(name),
+	}
+
+	pipe.runCtx, pipe.cancelFn = context.WithCancel(ctx)
 
 	return &pipe
 }

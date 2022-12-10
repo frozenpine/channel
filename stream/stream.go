@@ -1,6 +1,15 @@
 package stream
 
-import "github.com/frozenpine/msgqueue/pipeline"
+import (
+	"github.com/pkg/errors"
+
+	"github.com/frozenpine/msgqueue/pipeline"
+)
+
+var (
+	ErrFutureTick  = errors.New("future tick")
+	ErrHistoryTick = errors.New("history tick")
+)
 
 type Window[S, V any] interface {
 	Indexs() []S
