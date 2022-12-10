@@ -24,8 +24,11 @@ type MemoPipeLine[
 	outputChan channel.Channel[Sequence[OS, OV]]
 }
 
-func NewMemoPipeLine(ctx context.Context, name string) *MemoPipeLine {
-	pipe := MemoPipeLine{}
+func NewMemoPipeLine[
+	IS, IV comparable,
+	OS, OV comparable,
+](ctx context.Context, name string) *MemoPipeLine[IS, IV, OS, OV] {
+	pipe := MemoPipeLine[IS, IV, OS, OV]{}
 
 	return &pipe
 }
@@ -39,11 +42,13 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) ID() uuid.UUID {
 }
 
 func (pipe *MemoPipeLine[IS, IV, OS, OV]) Join() {
-	// TODO: join current thread
+	pipe.inputChan.Join()
+	pipe.outputChan.Join()
 }
 
 func (pipe *MemoPipeLine[IS, IV, OS, OV]) Release() {
-	// TODO: release to exit
+	pipe.inputChan.Release()
+	pipe.outputChan.Release()
 }
 
 func (pipe *MemoPipeLine[IS, IV, OS, OV]) init(ctx context.Context, name string, extraInit func()) {

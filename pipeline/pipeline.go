@@ -58,7 +58,7 @@ func NewPipeline[
 
 	switch typ {
 	case core.Memory:
-		return NewMemoChannel[T](ctx, name, bufSize), nil
+		return NewMemoPipeLine[IS, IV, OS, OV](ctx, name), nil
 	}
 
 	return nil, core.ErrInvalidType
