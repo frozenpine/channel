@@ -36,4 +36,6 @@ type Stream[
 	KEY comparable,
 ] interface {
 	pipeline.Pipeline[IS, IV, OS, OV]
+
+	Aggregatorable[IS, IV, OS, OV, KEY]
 }
