@@ -14,7 +14,7 @@ import (
 func TestChanType(t *testing.T) {
 	memoCh := channel.NewMemoChannel[int](context.TODO(), "", -1)
 
-	var ch channel.BaseChan = memoCh
+	var ch core.QueueBase = memoCh
 
 	t.Log(ch.Name(), ch.ID())
 }

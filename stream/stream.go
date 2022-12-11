@@ -11,31 +11,33 @@ var (
 	ErrHistoryTick = errors.New("history tick")
 )
 
-type Window[S, V any] interface {
-	Indexs() []S
-	Values() []V
-	Series() []pipeline.Sequence[S, V]
-	Push(d V) error
+type Window[
+	IS, IV any,
+	OS, OV any,
+] interface {
+	Indexs() []IS
+	Values() []IV
+	Series() []pipeline.Sequence[IS, IV]
+	Push(d IV) error
+	pipeline.Converter[IS, IV, OS, OV]
 }
 
 type Aggregatorable[
-	IS, IV comparable,
-	OS, OV comparable,
+	IS, IV any,
+	OS, OV any,
 	KEY comparable,
 ] interface {
 	WindowBy(func() <-chan pipeline.WaterMark) Aggregatorable[IS, IV, OS, OV, KEY]
 	FilterBy(func(pipeline.Sequence[IS, IV]) bool) Aggregatorable[IS, IV, OS, OV, KEY]
 	GroupBy(func(pipeline.Sequence[IS, IV]) KEY) Aggregatorable[IS, IV, OS, OV, KEY]
-	Action(func(Window[IS, IV]) pipeline.Sequence[OS, OV])
 	Groups() map[KEY]Aggregatorable[IS, IV, OS, OV, KEY]
 }
 
 type Stream[
-	IS, IV comparable,
-	OS, OV comparable,
+	IS, IV any,
+	OS, OV any,
 	KEY comparable,
 ] interface {
 	pipeline.Pipeline[IS, IV, OS, OV]
-
 	Aggregatorable[IS, IV, OS, OV, KEY]
 }

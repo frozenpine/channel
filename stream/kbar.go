@@ -2,13 +2,11 @@ package stream
 
 import (
 	"context"
-	"log"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/frozenpine/msgqueue/channel"
 	"github.com/frozenpine/msgqueue/core"
 	"github.com/frozenpine/msgqueue/pipeline"
 	"github.com/gofrs/uuid"
@@ -16,12 +14,15 @@ import (
 )
 
 const (
-	kbarGap = time.Minute
+	Min1BarGap = time.Minute
+	Min5BarGap = time.Minute * 5
+	HourBarGap = time.Hour
+	DayBarGap  = time.Hour * 24
 )
 
 var (
 	tradeSequencePool = sync.Pool{New: func() any { return &TradeSequence{} }}
-	kbarSequencePool  = sync.Pool{New: func() any { return &KBarSequence{} }}
+	kbarSequencePool  = sync.Pool{New: func() any { return &KBarWindow{} }}
 )
 
 type Trade interface {
@@ -74,31 +75,40 @@ type KBar interface {
 	Open() float64
 	Close() float64
 	Volume() int
+	Precise() time.Duration
 	Index() time.Time
 }
 
-type KBarSequence struct {
+type KBarWindow struct {
 	preBar      KBar
 	preSettle   float64
 	data        []Trade
 	totalVolume int
 	max, min    Trade
+	gap         time.Duration
 	index       time.Time
 }
 
-func NewKBarSequence(preBar *KBarSequence, preSettle float64) *KBarSequence {
-	bar := kbarSequencePool.Get().(*KBarSequence)
+func NewKBarWindow(preBar *KBarWindow, preSettle float64, gap time.Duration) *KBarWindow {
+	if gap < Min1BarGap {
+		gap = Min1BarGap
+	}
+
+	gap = gap.Round(Min1BarGap)
+
+	bar := kbarSequencePool.Get().(*KBarWindow)
 
 	bar.preBar = preBar
 	bar.preSettle = preSettle
+	bar.gap = gap
 
 	if bar.preBar != nil {
-		bar.index = preBar.index.Add(kbarGap)
+		bar.index = preBar.index.Add(gap)
 	} else {
 		now := time.Now()
-		index := now.Round(kbarGap)
+		index := now.Round(gap)
 		if core.TimeCompare(now, index) >= 0 {
-			index = index.Add(kbarGap)
+			index = index.Add(gap)
 		}
 		bar.index = index
 	}
@@ -111,7 +121,7 @@ func NewKBarSequence(preBar *KBarSequence, preSettle float64) *KBarSequence {
 	return bar
 }
 
-func (k *KBarSequence) Push(v Trade) error {
+func (k *KBarWindow) Push(v Trade) error {
 	if v == nil {
 		return nil
 	}
@@ -120,7 +130,7 @@ func (k *KBarSequence) Push(v Trade) error {
 		return errors.Wrap(ErrFutureTick, "trade ts after current bar")
 	}
 
-	if core.TimeCompare(k.index.Add(-kbarGap), v.TradeTime()) >= 0 {
+	if core.TimeCompare(k.index.Add(-k.gap), v.TradeTime()) >= 0 {
 		return errors.Wrap(ErrHistoryTick, "trade ts before current bar")
 	}
 
@@ -139,7 +149,7 @@ func (k *KBarSequence) Push(v Trade) error {
 	return nil
 }
 
-func (k *KBarSequence) getPrePrice() float64 {
+func (k *KBarWindow) getPrePrice() float64 {
 	if k.preBar != nil {
 		return k.preBar.Close()
 	}
@@ -147,7 +157,7 @@ func (k *KBarSequence) getPrePrice() float64 {
 	return k.preSettle
 }
 
-func (k *KBarSequence) High() float64 {
+func (k *KBarWindow) High() float64 {
 	if len(k.data) == 0 {
 		return k.getPrePrice()
 	}
@@ -155,7 +165,7 @@ func (k *KBarSequence) High() float64 {
 	return k.max.Price()
 }
 
-func (k *KBarSequence) Low() float64 {
+func (k *KBarWindow) Low() float64 {
 	if len(k.data) == 0 {
 		return k.getPrePrice()
 	}
@@ -163,7 +173,7 @@ func (k *KBarSequence) Low() float64 {
 	return k.min.Price()
 }
 
-func (k *KBarSequence) Open() float64 {
+func (k *KBarWindow) Open() float64 {
 	if len(k.data) == 0 {
 		return k.getPrePrice()
 	}
@@ -171,7 +181,7 @@ func (k *KBarSequence) Open() float64 {
 	return k.data[0].Price()
 }
 
-func (k *KBarSequence) Close() float64 {
+func (k *KBarWindow) Close() float64 {
 	if len(k.data) == 0 {
 		return k.getPrePrice()
 	}
@@ -179,136 +189,61 @@ func (k *KBarSequence) Close() float64 {
 	return k.data[len(k.data)-1].Price()
 }
 
-func (k *KBarSequence) Volume() int {
+func (k *KBarWindow) Volume() int {
 	return k.totalVolume
 }
 
-func (k *KBarSequence) Index() time.Time {
+func (k *KBarWindow) Index() time.Time {
 	return k.index
 }
 
-func (k *KBarSequence) Value() KBar {
+func (k *KBarWindow) Precise() time.Duration {
+	return k.gap
+}
+
+func (k *KBarWindow) Value() KBar {
 	return k
 }
 
-func (k *KBarSequence) IsWarterMark() bool {
+func (k *KBarWindow) IsWarterMark() bool {
 	return k.index.UnixMilli()%500 == 0
 }
 
-func (k *KBarSequence) Compare(than pipeline.Sequence[time.Time, KBar]) int {
+func (k *KBarWindow) Compare(than pipeline.Sequence[time.Time, KBar]) int {
 	return core.TimeCompare(k.index, than.Index())
 }
 
-type KBarPipeline struct {
-	name     string
-	id       uuid.UUID
-	ctx      context.Context
-	cancelFn context.CancelFunc
-
-	inputChan  channel.Channel[*TradeSequence]
-	outputChan channel.Channel[KBar]
-
-	currBar *KBarSequence
+type KBarSource interface {
+	Trade
+	KBar
 }
 
-func NewKBarPipeline(ctx context.Context, name string, preSettle float64) *KBarPipeline {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+type KBarStream[I KBarSource] struct {
+	stream MemoStream[time.Time, I, time.Time, KBar, string]
 
-	if name == "" {
-		name = core.GenName("KBarPipe")
-	}
-
-	pipe := KBarPipeline{
-		name:    name,
-		id:      core.GenID(name),
-		currBar: NewKBarSequence(nil, preSettle),
-	}
-	pipe.ctx, pipe.cancelFn = context.WithCancel(ctx)
-	pipe.id = core.GenID(pipe.name)
-
-	go pipe.dispatcher()
-
-	return &pipe
+	currBar *KBarWindow
 }
 
-func (ch *KBarPipeline) Name() string {
-	return ch.name
+func NewKBarStream[I KBarSource](ctx context.Context, name string, preSettle float64, gap time.Duration) *KBarStream {
+	stream := KBarStream[I]{}
+
+	stream.Init(ctx, name, func() {
+		// TODO: extra init
+		// stream.aggregator =
+		// stream.currBar =
+	})
+
+	return &stream
 }
 
-func (ch *KBarPipeline) ID() uuid.UUID {
-	return ch.id
+func (stm *KBarStream[I]) Init(ctx context.Context, name string, extraInit func()) {
+	stm.stream.Init(ctx, name, extraInit)
 }
 
-func (ch *KBarPipeline) dispatcher() {
-	subID, in := ch.inputChan.Subscribe("kbar", core.Quick)
-
-	log.Printf("Start trade consumer[kbar]: %v", subID)
-
-	var err error
-
-	for seq := range in {
-		if err = ch.currBar.Push(seq.Trade); err == nil {
-			continue
-		}
-
-		switch errors.Unwrap(err) {
-		case ErrFutureTick:
-			ch.outputChan.Publish(ch.currBar, -1)
-			ch.currBar = NewKBarSequence(ch.currBar, ch.currBar.preSettle)
-		case ErrHistoryTick:
-			log.Printf("Received history data: %+v, %+v", seq, ch.currBar)
-		default:
-			log.Printf("Unhandled err occoured: %+v", err)
-		}
-	}
+func (stm *KBarStream[I]) Name() string {
+	return stm.stream.Name()
 }
 
-func (ch *KBarPipeline) Publish(v Trade, timeout time.Duration) error {
-	return ch.inputChan.Publish(NewTradeSequence(v), timeout)
-}
-
-func (ch *KBarPipeline) Subscribe(name string, resume core.ResumeType) (uuid.UUID, <-chan KBar) {
-	return ch.outputChan.Subscribe(name, resume)
-}
-
-func (ch *KBarPipeline) UnSubscribe(subID uuid.UUID) error {
-	return ch.outputChan.UnSubscribe(subID)
-}
-
-func (ch *KBarPipeline) PipelineUpStream(src core.Consumer[Trade]) error {
-	if src == nil {
-		return errors.Wrap(core.ErrPipeline, "upstream empty")
-	}
-
-	subID, upChan := src.Subscribe(ch.name, core.Quick)
-
-	go func() {
-		defer src.UnSubscribe(subID)
-
-		for {
-			select {
-			case <-ch.ctx.Done():
-				return
-			case td := <-upChan:
-				if td == nil {
-					continue
-				}
-
-				ch.inputChan.Publish(NewTradeSequence(td), -1)
-			}
-		}
-	}()
-
-	return nil
-}
-
-func (ch *KBarPipeline) PipelineDownStream(dst core.Upstream[KBar]) error {
-	if dst == nil {
-		return errors.Wrap(core.ErrPipeline, "empty downstream")
-	}
-
-	return nil
-	// return dst.PipelineUpStream(ch)
+func (stm *KBarStream[I]) ID() uuid.UUID {
+	return stm.stream.ID()
 }

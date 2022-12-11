@@ -19,24 +19,18 @@ type Sequence[S, V any] interface {
 	WaterMark
 }
 
-type BasePipe interface {
-	core.QueueBase
-
-	init(ctx context.Context, name string, extraInit func())
-}
-
 type Converter[
-	IS, IV comparable,
-	OS, OV comparable,
+	IS, IV any,
+	OS, OV any,
 ] interface {
-	Convert(Sequence[IS, IV]) Sequence[OS, OV]
+	Convert(Sequence[IS, IV], core.Producer[Sequence[OS, OV]]) error
 }
 
 type Pipeline[
-	IS, IV comparable,
-	OS, OV comparable,
+	IS, IV any,
+	OS, OV any,
 ] interface {
-	BasePipe
+	core.QueueBase
 	core.Producer[Sequence[IS, IV]]
 	core.Consumer[Sequence[OS, OV]]
 	core.Upstream[Sequence[IS, IV]]
@@ -44,8 +38,8 @@ type Pipeline[
 }
 
 func NewPipeline[
-	IS, IV comparable,
-	OS, OV comparable,
+	IS, IV any,
+	OS, OV any,
 ](ctx context.Context, name string, cvt Converter[IS, IV, OS, OV]) (Pipeline[IS, IV, OS, OV], error) {
 	var typ core.Type = core.Memory
 

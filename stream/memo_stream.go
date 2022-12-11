@@ -1,10 +1,12 @@
 package stream
 
-import "github.com/frozenpine/msgqueue/pipeline"
+import (
+	"github.com/frozenpine/msgqueue/pipeline"
+)
 
 type MemoStream[
-	IS, IV comparable,
-	OS, OV comparable,
+	IS, IV any,
+	OS, OV any,
 	KEY comparable,
 ] struct {
 	pipeline.MemoPipeLine[IS, IV, OS, OV]
@@ -28,10 +30,6 @@ func (strm *MemoStream[IS, IV, OS, OV, KEY]) GroupBy(fn func(pipeline.Sequence[I
 	strm.aggregator = strm.aggregator.GroupBy(fn)
 
 	return strm
-}
-
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) Action(fn func(Window[IS, IV]) pipeline.Sequence[OS, OV]) {
-	strm.aggregator.Action(fn)
 }
 
 func (strm *MemoStream[IS, IV, OS, OV, KEY]) Groups() map[KEY]Aggregatorable[IS, IV, OS, OV, KEY] {

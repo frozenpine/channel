@@ -47,12 +47,18 @@ type MemoChannel[T any] struct {
 func NewMemoChannel[T any](ctx context.Context, name string, bufSize int) *MemoChannel[T] {
 	channel := MemoChannel[T]{}
 
-	channel.init(ctx, name, bufSize, nil)
+	if bufSize <= 0 {
+		bufSize = defaultChanSize
+	}
+
+	channel.Init(ctx, name, func() {
+		channel.chanLen = bufSize
+	})
 
 	return &channel
 }
 
-func (ch *MemoChannel[T]) init(ctx context.Context, name string, bufSize int, extraInit func()) {
+func (ch *MemoChannel[T]) Init(ctx context.Context, name string, extraInit func()) {
 	ch.initOnce.Do(func() {
 		if ctx == nil {
 			ctx = context.Background()
@@ -62,14 +68,9 @@ func (ch *MemoChannel[T]) init(ctx context.Context, name string, bufSize int, ex
 			name = core.GenName("MemoChan")
 		}
 
-		if bufSize <= 0 {
-			bufSize = defaultChanSize
-		}
-
 		ch.runCtx, ch.cancelFn = context.WithCancel(ctx)
 		ch.name = name
 		ch.id = core.GenID(name)
-		ch.chanLen = bufSize
 		ch.input = ch.makeChan()
 		ch.waitInfinite = make(chan time.Time)
 

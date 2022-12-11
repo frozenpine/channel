@@ -5,7 +5,6 @@ import (
 	"log"
 	"sync"
 
-	"github.com/frozenpine/msgqueue/channel"
 	"github.com/frozenpine/msgqueue/core"
 	"github.com/gofrs/uuid"
 )
@@ -25,25 +24,34 @@ type MemoHub struct {
 }
 
 func NewMemoHub(ctx context.Context, name string, bufSize int) *MemoHub {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	if name == "" {
-		name = core.GenName("MemoHub")
-	}
-
 	hub := MemoHub{}
 
-	hub.initOnce.Do(func() {
-		hub.runCtx, hub.cancelFn = context.WithCancel(ctx)
-
+	hub.Init(ctx, name, func() {
 		hub.chanLen = bufSize
-		hub.id = core.GenID(name)
-		hub.name = name
 	})
 
 	return &hub
+}
+
+func (hub *MemoHub) Init(ctx context.Context, name string, extraInit func()) {
+	hub.initOnce.Do(func() {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		if name == "" {
+			name = core.GenName("MemoHub")
+		}
+
+		hub.runCtx, hub.cancelFn = context.WithCancel(ctx)
+
+		hub.id = core.GenID(name)
+		hub.name = name
+
+		if extraInit != nil {
+			extraInit()
+		}
+	})
 }
 
 func (hub *MemoHub) ID() uuid.UUID {
@@ -64,7 +72,7 @@ func (hub *MemoHub) Release() {
 
 		hub.topicChanCache.Range(func(key, value any) bool {
 			topic := key.(string)
-			ch := value.(channel.BaseChan)
+			ch := value.(core.QueueBase)
 
 			log.Printf("Closing channel for topic: %s", topic)
 			ch.Release()
@@ -78,7 +86,7 @@ func (hub *MemoHub) Join() {
 	<-hub.runCtx.Done()
 
 	hub.topicChanCache.Range(func(key, value any) bool {
-		ch := value.(channel.BaseChan)
+		ch := value.(core.QueueBase)
 
 		ch.Join()
 
@@ -99,9 +107,9 @@ func (hub *MemoHub) Topics() []string {
 	return topics
 }
 
-func (hub *MemoHub) createTopicChannel(topic string, fn ChannelCreateWrapper) (channel.BaseChan, error) {
+func (hub *MemoHub) createTopicChannel(topic string, fn ChannelCreateWrapper) (core.QueueBase, error) {
 	if ch, exist := hub.topicChanCache.Load(topic); exist {
-		return ch.(channel.BaseChan), ErrTopicExist
+		return ch.(core.QueueBase), ErrTopicExist
 	}
 
 	if ch, err := fn(
@@ -112,13 +120,13 @@ func (hub *MemoHub) createTopicChannel(topic string, fn ChannelCreateWrapper) (c
 		return nil, err
 	} else {
 		result, _ := hub.topicChanCache.LoadOrStore(topic, ch)
-		return result.(channel.BaseChan), nil
+		return result.(core.QueueBase), nil
 	}
 }
 
-func (hub *MemoHub) getTopicChannel(topic string) (channel.BaseChan, error) {
+func (hub *MemoHub) getTopicChannel(topic string) (core.QueueBase, error) {
 	if ch, exist := hub.topicChanCache.Load(topic); exist {
-		return ch.(channel.BaseChan), nil
+		return ch.(core.QueueBase), nil
 	}
 
 	return nil, ErrNoTopic

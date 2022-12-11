@@ -18,7 +18,7 @@ var (
 	ErrInvalidChannel = originErr.New("invalid channel")
 )
 
-type ChannelCreateWrapper func(context.Context, string, int) (channel.BaseChan, error)
+type ChannelCreateWrapper func(context.Context, string, int) (core.QueueBase, error)
 
 type Hub interface {
 	core.QueueBase
@@ -28,8 +28,8 @@ type Hub interface {
 	Join()
 	Topics() []string
 
-	createTopicChannel(topic string, fn ChannelCreateWrapper) (channel.BaseChan, error)
-	getTopicChannel(topic string) (channel.BaseChan, error)
+	createTopicChannel(topic string, fn ChannelCreateWrapper) (core.QueueBase, error)
+	getTopicChannel(topic string) (core.QueueBase, error)
 }
 
 func GetHubTopicChannel[T any](hub Hub, topic string) (channel.Channel[T], error) {
@@ -54,7 +54,7 @@ func GetOrCreateTopicChannel[T any](hub Hub, topic string) (channel.Channel[T], 
 
 	if ch, err := hub.createTopicChannel(
 		topic,
-		func(ctx context.Context, name string, bufSize int) (channel.BaseChan, error) {
+		func(ctx context.Context, name string, bufSize int) (core.QueueBase, error) {
 			return channel.NewChannel[T](ctx, name, bufSize)
 		},
 	); err == nil {

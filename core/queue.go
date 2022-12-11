@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"time"
 
 	"github.com/gofrs/uuid"
@@ -16,6 +17,7 @@ const (
 )
 
 type QueueBase interface {
+	Init(context.Context, string, func())
 	ID() uuid.UUID
 	Name() string
 	Release()

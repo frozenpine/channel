@@ -13,8 +13,8 @@ import (
 )
 
 type MemoPipeLine[
-	IS, IV comparable,
-	OS, OV comparable,
+	IS, IV any,
+	OS, OV any,
 ] struct {
 	name     string
 	id       uuid.UUID
@@ -31,12 +31,12 @@ type MemoPipeLine[
 }
 
 func NewMemoPipeLine[
-	IS, IV comparable,
-	OS, OV comparable,
+	IS, IV any,
+	OS, OV any,
 ](ctx context.Context, name string, cvt Converter[IS, IV, OS, OV]) *MemoPipeLine[IS, IV, OS, OV] {
 	pipe := MemoPipeLine[IS, IV, OS, OV]{}
 
-	pipe.init(ctx, name, func() {
+	pipe.Init(ctx, name, func() {
 		pipe.converter = cvt
 	})
 
@@ -66,7 +66,7 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) Release() {
 	})
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) init(ctx context.Context, name string, extraInit func()) {
+func (pipe *MemoPipeLine[IS, IV, OS, OV]) Init(ctx context.Context, name string, extraInit func()) {
 	pipe.initOnce.Do(func() {
 		if ctx == nil {
 			ctx = context.Background()
@@ -109,9 +109,7 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) dispatcher() {
 				return
 			}
 
-			if out := pipe.converter.Convert(in); out == nil {
-				continue
-			} else if err := pipe.outputChan.Publish(out, -1); err != nil {
+			if err := pipe.converter.Convert(in, pipe.outputChan); err != nil {
 				log.Printf("Dispatch to output chan failed: %+v", err)
 			}
 		}

@@ -17,14 +17,8 @@ var (
 	ChannelTypeKey = "HubType"
 )
 
-type BaseChan interface {
-	core.QueueBase
-
-	init(ctx context.Context, name string, bufSize int, extraInit func())
-}
-
 type Channel[T any] interface {
-	BaseChan
+	core.QueueBase
 	core.Consumer[T]
 	core.Producer[T]
 	core.Upstream[T]
