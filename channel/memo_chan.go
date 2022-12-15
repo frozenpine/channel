@@ -65,12 +65,12 @@ func (ch *MemoChannel[T]) Init(ctx context.Context, name string, extraInit func(
 		}
 
 		if name == "" {
-			name = core.GenName("MemoChan")
+			name = "MemoChan"
 		}
 
 		ch.runCtx, ch.cancelFn = context.WithCancel(ctx)
-		ch.name = name
-		ch.id = core.GenID(name)
+		ch.name = core.GenName(name)
+		ch.id = core.GenID(ch.name)
 		ch.input = ch.makeChan()
 		ch.waitInfinite = make(chan time.Time)
 

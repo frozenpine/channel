@@ -40,13 +40,13 @@ func (hub *MemoHub) Init(ctx context.Context, name string, extraInit func()) {
 		}
 
 		if name == "" {
-			name = core.GenName("MemoHub")
+			name = "MemoHub"
 		}
 
 		hub.runCtx, hub.cancelFn = context.WithCancel(ctx)
 
-		hub.id = core.GenID(name)
-		hub.name = name
+		hub.name = core.GenName(name)
+		hub.id = core.GenID(hub.name)
 
 		if extraInit != nil {
 			extraInit()

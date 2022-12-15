@@ -3,13 +3,13 @@ package stream
 import (
 	"context"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/frozenpine/msgqueue/core"
 	"github.com/frozenpine/msgqueue/pipeline"
-	"github.com/gofrs/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -82,10 +82,10 @@ type KBar interface {
 type KBarWindow struct {
 	preBar      KBar
 	preSettle   float64
-	data        []Trade
+	data        []*TradeSequence
 	totalVolume int
 	max, min    Trade
-	gap         time.Duration
+	precise     time.Duration
 	index       time.Time
 }
 
@@ -100,7 +100,7 @@ func NewKBarWindow(preBar *KBarWindow, preSettle float64, gap time.Duration) *KB
 
 	bar.preBar = preBar
 	bar.preSettle = preSettle
-	bar.gap = gap
+	bar.precise = gap
 
 	if bar.preBar != nil {
 		bar.index = preBar.index.Add(gap)
@@ -121,33 +121,83 @@ func NewKBarWindow(preBar *KBarWindow, preSettle float64, gap time.Duration) *KB
 	return bar
 }
 
-func (k *KBarWindow) Push(v Trade) error {
+func (k *KBarWindow) Indexs() []time.Time {
+	indexes := make([]time.Time, len(k.data))
+
+	for idx, td := range k.data {
+		indexes[idx] = td.Index()
+	}
+
+	sort.SliceStable(indexes, func(i, j int) bool {
+		return indexes[i].Before(indexes[j])
+	})
+
+	return indexes
+}
+
+func (k *KBarWindow) Values() []Trade {
+	values := make([]Trade, len(k.data))
+
+	for idx, td := range k.data {
+		values[idx] = td
+	}
+
+	sort.Slice(values, func(i, j int) bool {
+		return strings.Compare(values[i].Identity(), values[j].Identity()) < 0
+	})
+
+	return values
+}
+
+func (k *KBarWindow) Series() []pipeline.Sequence[time.Time, Trade] {
+	series := make([]pipeline.Sequence[time.Time, Trade], len(k.data))
+
+	for idx, td := range k.data {
+		series[idx] = td
+	}
+
+	sort.SliceStable(series, func(i, j int) bool {
+		return series[i].Index().Before(series[j].Index())
+	})
+
+	return series
+}
+
+func (k *KBarWindow) Push(v pipeline.Sequence[time.Time, Trade]) error {
 	if v == nil {
 		return nil
 	}
 
-	if core.TimeCompare(k.index, v.TradeTime()) < 0 {
+	td := v.Value()
+
+	if core.TimeCompare(k.index, td.TradeTime()) < 0 {
 		return errors.Wrap(ErrFutureTick, "trade ts after current bar")
 	}
 
-	if core.TimeCompare(k.index.Add(-k.gap), v.TradeTime()) >= 0 {
+	if core.TimeCompare(k.index.Add(-k.precise), td.TradeTime()) >= 0 {
 		return errors.Wrap(ErrHistoryTick, "trade ts before current bar")
 	}
 
-	k.data = append(k.data, v)
+	k.data = append(k.data, v.(*TradeSequence))
 
-	k.totalVolume += v.Volume()
+	k.totalVolume += td.Volume()
 
-	if k.max == nil || v.Price() > k.max.Price() {
-		k.max = v
+	if k.max == nil || td.Price() > k.max.Price() {
+		k.max = td
 	}
 
-	if k.min == nil || v.Price() < k.min.Price() {
-		k.min = v
+	if k.min == nil || td.Price() < k.min.Price() {
+		k.min = td
 	}
 
 	return nil
 }
+
+func (k *KBarWindow) NextWindow() Window[time.Time, Trade, time.Time, KBar] {
+	return NewKBarWindow(k, k.preSettle, k.precise)
+}
+
+func (k *KBarWindow) IsWaterMark() bool { return true }
 
 func (k *KBarWindow) getPrePrice() float64 {
 	if k.preBar != nil {
@@ -198,7 +248,7 @@ func (k *KBarWindow) Index() time.Time {
 }
 
 func (k *KBarWindow) Precise() time.Duration {
-	return k.gap
+	return k.precise
 }
 
 func (k *KBarWindow) Value() KBar {
@@ -213,37 +263,27 @@ func (k *KBarWindow) Compare(than pipeline.Sequence[time.Time, KBar]) int {
 	return core.TimeCompare(k.index, than.Index())
 }
 
-type KBarSource interface {
-	Trade
-	KBar
+type KBarStream struct {
+	MemoStream[time.Time, Trade, time.Time, KBar, string]
 }
 
-type KBarStream[I KBarSource] struct {
-	stream MemoStream[time.Time, I, time.Time, KBar, string]
-
-	currBar *KBarWindow
-}
-
-func NewKBarStream[I KBarSource](ctx context.Context, name string, preSettle float64, gap time.Duration) *KBarStream {
-	stream := KBarStream[I]{}
+func NewKBarStream(ctx context.Context, name string, preSettle float64, gap time.Duration) *KBarStream {
+	stream := KBarStream{}
 
 	stream.Init(ctx, name, func() {
-		// TODO: extra init
-		// stream.aggregator =
-		// stream.currBar =
+		stream.pipeline = pipeline.NewMemoPipeLine(ctx, name, stream.convert)
+		stream.currWindow = NewKBarWindow(nil, preSettle, Min1BarGap)
+
+		stream.aggregator = func(
+			w Window[time.Time, Trade, time.Time, KBar],
+		) (pipeline.Sequence[time.Time, KBar], error) {
+			if bar, ok := w.(*KBarWindow); ok {
+				return bar, nil
+			} else {
+				return nil, errors.New("not Kbar window")
+			}
+		}
 	})
 
 	return &stream
-}
-
-func (stm *KBarStream[I]) Init(ctx context.Context, name string, extraInit func()) {
-	stm.stream.Init(ctx, name, extraInit)
-}
-
-func (stm *KBarStream[I]) Name() string {
-	return stm.stream.Name()
-}
-
-func (stm *KBarStream[I]) ID() uuid.UUID {
-	return stm.stream.ID()
 }

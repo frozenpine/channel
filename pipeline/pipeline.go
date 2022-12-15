@@ -22,9 +22,7 @@ type Sequence[S, V any] interface {
 type Converter[
 	IS, IV any,
 	OS, OV any,
-] interface {
-	Convert(Sequence[IS, IV], core.Producer[Sequence[OS, OV]]) error
-}
+] func(Sequence[IS, IV], core.Producer[Sequence[OS, OV]]) error
 
 type Pipeline[
 	IS, IV any,

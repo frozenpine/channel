@@ -62,6 +62,7 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) Release() {
 	pipe.releaseOnce.Do(func() {
 		pipe.cancelFn()
 		pipe.inputChan.Release()
+		pipe.inputChan.Join()
 		pipe.outputChan.Release()
 	})
 }
@@ -75,11 +76,11 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) Init(ctx context.Context, name string,
 		pipe.runCtx, pipe.cancelFn = context.WithCancel(ctx)
 
 		if name == "" {
-			name = core.GenName("")
+			name = "MemoPipeline"
 		}
 
-		pipe.name = name
-		pipe.id = core.GenID(name)
+		pipe.name = core.GenName(name)
+		pipe.id = core.GenID(pipe.name)
 		pipe.inputChan = channel.NewMemoChannel[Sequence[IS, IV]](ctx, name+"_input", 0)
 		pipe.outputChan = channel.NewMemoChannel[Sequence[OS, OV]](ctx, name+"_output", 0)
 
@@ -109,7 +110,7 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) dispatcher() {
 				return
 			}
 
-			if err := pipe.converter.Convert(in, pipe.outputChan); err != nil {
+			if err := pipe.converter(in, pipe.outputChan); err != nil {
 				log.Printf("Dispatch to output chan failed: %+v", err)
 			}
 		}
