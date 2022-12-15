@@ -6,39 +6,24 @@ import (
 	"github.com/frozenpine/msgqueue/core"
 )
 
-type WaterMark interface {
-	IsWaterMark() bool
-}
-
-type Sequence[S, V any] interface {
-	Value() V
-	Index() S
-
-	Compare(than Sequence[S, V]) int
-
-	WaterMark
-}
-
 type Converter[
-	IS, IV any,
-	OS, OV any,
-] func(Sequence[IS, IV], core.Producer[Sequence[OS, OV]]) error
+	IV, OV any,
+] func(IV, core.Producer[OV]) error
 
 type Pipeline[
-	IS, IV any,
-	OS, OV any,
+	IV, OV any,
 ] interface {
 	core.QueueBase
-	core.Producer[Sequence[IS, IV]]
-	core.Consumer[Sequence[OS, OV]]
-	core.Upstream[Sequence[IS, IV]]
-	core.Downstream[Sequence[OS, OV]]
+	core.Producer[IV]
+	core.Consumer[OV]
+	core.Upstream[IV]
+	core.Downstream[OV]
 }
 
 func NewPipeline[
 	IS, IV any,
 	OS, OV any,
-](ctx context.Context, name string, cvt Converter[IS, IV, OS, OV]) (Pipeline[IS, IV, OS, OV], error) {
+](ctx context.Context, name string, cvt Converter[IV, OV]) (Pipeline[IV, OV], error) {
 	var typ core.Type = core.Memory
 
 	if ctx == nil {

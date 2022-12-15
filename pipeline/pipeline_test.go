@@ -9,25 +9,13 @@ import (
 	"github.com/frozenpine/msgqueue/core"
 )
 
-type seq[T int | float64] struct {
-	v  T
-	ts time.Time
-}
-
-func (seq *seq[T]) Value() T         { return seq.v }
-func (seq *seq[T]) Index() time.Time { return seq.ts }
-func (seq *seq[T]) Compare(than Sequence[time.Time, T]) int {
-	return core.TimeCompare(seq.ts, than.Index())
-}
-func (seq *seq[T]) IsWaterMark() bool { return false }
-
 func TestMemoPipeline(t *testing.T) {
 	line := NewMemoPipeLine(
-		context.TODO(), "test",
-		func(s Sequence[time.Time, int], c core.Producer[Sequence[time.Time, float64]]) error {
-			o := float64(s.Value()) * 0.5
+		context.TODO(), "pipeline",
+		func(s int, c core.Producer[float64]) error {
+			o := float64(s) * 0.5
 
-			return c.Publish(&seq[float64]{v: o, ts: s.Index()}, -1)
+			return c.Publish(o, -1)
 		},
 	)
 
@@ -43,12 +31,13 @@ func TestMemoPipeline(t *testing.T) {
 		}()
 
 		for v := range ch {
-			t.Log("output:", v.Index(), v.Value())
+			t.Log("output:", v)
 		}
 	}()
 
+	<-time.After(1 * time.Second)
 	for idx := 0; idx < 100; idx++ {
-		line.Publish(&seq[int]{v: idx, ts: time.Now()}, -1)
+		line.Publish(idx, -1)
 	}
 
 	line.Release()

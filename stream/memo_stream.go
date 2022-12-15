@@ -17,7 +17,7 @@ type DefaultWindow[
 	IS, IV any,
 	OS, OV any,
 ] struct {
-	sequence []pipeline.Sequence[IS, IV]
+	sequence []Sequence[IS, IV]
 }
 
 func (win *DefaultWindow[IS, IV, OS, OV]) Indexs() []IS {
@@ -40,11 +40,11 @@ func (win *DefaultWindow[IS, IV, OS, OV]) Values() []IV {
 	return values
 }
 
-func (win *DefaultWindow[IS, IV, OS, OV]) Series() []pipeline.Sequence[IS, IV] {
+func (win *DefaultWindow[IS, IV, OS, OV]) Series() []Sequence[IS, IV] {
 	return win.sequence
 }
 
-func (win *DefaultWindow[IS, IV, OS, OV]) Push(seq pipeline.Sequence[IS, IV]) error {
+func (win *DefaultWindow[IS, IV, OS, OV]) Push(seq Sequence[IS, IV]) error {
 	if seq.IsWaterMark() {
 		return ErrFutureTick
 	}
@@ -70,7 +70,7 @@ type MemoStream[
 
 	initOnce, releaseOnce sync.Once
 
-	pipeline pipeline.Pipeline[IS, IV, OS, OV]
+	pipeline pipeline.Pipeline[Sequence[IS, IV], Sequence[OS, OV]]
 
 	windowCache []Window[IS, IV, OS, OV]
 	currWindow  Window[IS, IV, OS, OV]
@@ -104,7 +104,7 @@ func NewMemoStream[
 	return &stream, nil
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) convert(inData pipeline.Sequence[IS, IV], outChan core.Producer[pipeline.Sequence[OS, OV]]) error {
+func (strm *MemoStream[IS, IV, OS, OV, KEY]) convert(inData Sequence[IS, IV], outChan core.Producer[Sequence[OS, OV]]) error {
 	err := strm.currWindow.Push(inData)
 
 	switch errors.Unwrap(err) {
@@ -172,11 +172,11 @@ func (strm *MemoStream[IS, IV, OS, OV, KEY]) Release() {
 	})
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) Publish(v pipeline.Sequence[IS, IV], timeout time.Duration) error {
+func (strm *MemoStream[IS, IV, OS, OV, KEY]) Publish(v Sequence[IS, IV], timeout time.Duration) error {
 	return strm.pipeline.Publish(v, timeout)
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) Subscribe(name string, resume core.ResumeType) (uuid.UUID, <-chan pipeline.Sequence[OS, OV]) {
+func (strm *MemoStream[IS, IV, OS, OV, KEY]) Subscribe(name string, resume core.ResumeType) (uuid.UUID, <-chan Sequence[OS, OV]) {
 	return strm.pipeline.Subscribe(name, resume)
 }
 
@@ -184,10 +184,10 @@ func (strm *MemoStream[IS, IV, OS, OV, KEY]) UnSubscribe(subID uuid.UUID) error 
 	return strm.pipeline.UnSubscribe(subID)
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) PipelineUpstream(src core.Consumer[pipeline.Sequence[IS, IV]]) error {
+func (strm *MemoStream[IS, IV, OS, OV, KEY]) PipelineUpstream(src core.Consumer[Sequence[IS, IV]]) error {
 	return strm.pipeline.PipelineUpStream(src)
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) PipelineDownStream(dst core.Upstream[pipeline.Sequence[OS, OV]]) error {
+func (strm *MemoStream[IS, IV, OS, OV, KEY]) PipelineDownStream(dst core.Upstream[Sequence[OS, OV]]) error {
 	return strm.pipeline.PipelineDownStream(dst)
 }

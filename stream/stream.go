@@ -12,10 +12,23 @@ var (
 	ErrInvalidAggregator = errors.New("invalid aggregator")
 )
 
+type WaterMark interface {
+	IsWaterMark() bool
+}
+
+type Sequence[S, V any] interface {
+	Value() V
+	Index() S
+
+	Compare(than Sequence[S, V]) int
+
+	WaterMark
+}
+
 type Aggregator[
 	IS, IV any,
 	OS, OV any,
-] func(Window[IS, IV, OS, OV]) (pipeline.Sequence[OS, OV], error)
+] func(Window[IS, IV, OS, OV]) (Sequence[OS, OV], error)
 
 type Window[
 	IS, IV any,
@@ -23,8 +36,8 @@ type Window[
 ] interface {
 	Indexs() []IS
 	Values() []IV
-	Series() []pipeline.Sequence[IS, IV]
-	Push(pipeline.Sequence[IS, IV]) error
+	Series() []Sequence[IS, IV]
+	Push(Sequence[IS, IV]) error
 	NextWindow() Window[IS, IV, OS, OV]
 }
 
@@ -33,11 +46,11 @@ type Stream[
 	OS, OV any,
 	KEY comparable,
 ] interface {
-	pipeline.Pipeline[IS, IV, OS, OV]
+	pipeline.Pipeline[Sequence[IS, IV], Sequence[OS, OV]]
 
-	WindowBy(func() <-chan pipeline.WaterMark) Stream[IS, IV, OS, OV, KEY]
-	FilterBy(func(pipeline.Sequence[IS, IV]) bool) Stream[IS, IV, OS, OV, KEY]
-	GroupBy(func(pipeline.Sequence[IS, IV]) KEY) map[KEY]Stream[IS, IV, OS, OV, KEY]
+	WindowBy(func() <-chan WaterMark) Stream[IS, IV, OS, OV, KEY]
+	FilterBy(func(Sequence[IS, IV]) bool) Stream[IS, IV, OS, OV, KEY]
+	GroupBy(func(Sequence[IS, IV]) KEY) map[KEY]Stream[IS, IV, OS, OV, KEY]
 
 	// PreWindow get n count previous window
 	// if n count <= 0, will return current window

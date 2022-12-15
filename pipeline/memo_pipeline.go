@@ -13,8 +13,7 @@ import (
 )
 
 type MemoPipeLine[
-	IS, IV any,
-	OS, OV any,
+	IV, OV any,
 ] struct {
 	name     string
 	id       uuid.UUID
@@ -24,17 +23,16 @@ type MemoPipeLine[
 	initOnce    sync.Once
 	releaseOnce sync.Once
 
-	inputChan  channel.Channel[Sequence[IS, IV]]
-	outputChan channel.Channel[Sequence[OS, OV]]
+	inputChan  channel.Channel[IV]
+	outputChan channel.Channel[OV]
 
-	converter Converter[IS, IV, OS, OV]
+	converter Converter[IV, OV]
 }
 
 func NewMemoPipeLine[
-	IS, IV any,
-	OS, OV any,
-](ctx context.Context, name string, cvt Converter[IS, IV, OS, OV]) *MemoPipeLine[IS, IV, OS, OV] {
-	pipe := MemoPipeLine[IS, IV, OS, OV]{}
+	IV, OV any,
+](ctx context.Context, name string, cvt Converter[IV, OV]) *MemoPipeLine[IV, OV] {
+	pipe := MemoPipeLine[IV, OV]{}
 
 	pipe.Init(ctx, name, func() {
 		pipe.converter = cvt
@@ -43,31 +41,29 @@ func NewMemoPipeLine[
 	return &pipe
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) Name() string {
+func (pipe *MemoPipeLine[IV, OV]) Name() string {
 	return pipe.name
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) ID() uuid.UUID {
+func (pipe *MemoPipeLine[IV, OV]) ID() uuid.UUID {
 	return pipe.id
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) Join() {
+func (pipe *MemoPipeLine[IV, OV]) Join() {
 	<-pipe.runCtx.Done()
 
 	pipe.inputChan.Join()
 	pipe.outputChan.Join()
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) Release() {
+func (pipe *MemoPipeLine[IV, OV]) Release() {
 	pipe.releaseOnce.Do(func() {
 		pipe.cancelFn()
 		pipe.inputChan.Release()
-		pipe.inputChan.Join()
-		pipe.outputChan.Release()
 	})
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) Init(
+func (pipe *MemoPipeLine[IV, OV]) Init(
 	ctx context.Context, name string,
 	extraInit func(),
 ) {
@@ -86,9 +82,9 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) Init(
 		pipe.id = core.GenID(pipe.name)
 
 		// use seperate context to prevent exit same time
-		pipe.inputChan = channel.NewMemoChannel[Sequence[IS, IV]](
+		pipe.inputChan = channel.NewMemoChannel[IV](
 			context.Background(), name+"_input", 0)
-		pipe.outputChan = channel.NewMemoChannel[Sequence[OS, OV]](
+		pipe.outputChan = channel.NewMemoChannel[OV](
 			context.Background(), name+"_output", 0)
 
 		if extraInit != nil {
@@ -99,7 +95,7 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) Init(
 	})
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) dispatcher() {
+func (pipe *MemoPipeLine[IV, OV]) dispatcher() {
 	if pipe.converter == nil {
 		log.Panic("Input converter to output missing")
 	}
@@ -114,6 +110,7 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) dispatcher() {
 			pipe.Release()
 		case in, ok := <-upChan:
 			if !ok {
+				pipe.outputChan.Release()
 				return
 			}
 
@@ -124,19 +121,19 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) dispatcher() {
 	}
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) Publish(v Sequence[IS, IV], timeout time.Duration) error {
+func (pipe *MemoPipeLine[IV, OV]) Publish(v IV, timeout time.Duration) error {
 	return pipe.inputChan.Publish(v, timeout)
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) Subscribe(name string, resume core.ResumeType) (uuid.UUID, <-chan Sequence[OS, OV]) {
+func (pipe *MemoPipeLine[IV, OV]) Subscribe(name string, resume core.ResumeType) (uuid.UUID, <-chan OV) {
 	return pipe.outputChan.Subscribe(name, resume)
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) UnSubscribe(subID uuid.UUID) error {
+func (pipe *MemoPipeLine[IV, OV]) UnSubscribe(subID uuid.UUID) error {
 	return pipe.outputChan.UnSubscribe(subID)
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) PipelineUpStream(src core.Consumer[Sequence[IS, IV]]) error {
+func (pipe *MemoPipeLine[IV, OV]) PipelineUpStream(src core.Consumer[IV]) error {
 	if src == nil {
 		return errors.Wrap(core.ErrPipeline, "empty upstream")
 	}
@@ -166,7 +163,7 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) PipelineUpStream(src core.Consumer[Seq
 	return nil
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) PipelineDownStream(dst core.Upstream[Sequence[OS, OV]]) error {
+func (pipe *MemoPipeLine[IV, OV]) PipelineDownStream(dst core.Upstream[OV]) error {
 	if dst == nil {
 		return errors.Wrap(core.ErrPipeline, "empty downstream")
 	}

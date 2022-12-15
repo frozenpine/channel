@@ -57,7 +57,7 @@ func (td *TradeSequence) Value() Trade {
 	return td.Trade
 }
 
-func (td *TradeSequence) Compare(than pipeline.Sequence[time.Time, Trade]) int {
+func (td *TradeSequence) Compare(than Sequence[time.Time, Trade]) int {
 	if td.IsWaterMark() || than.IsWaterMark() {
 		return core.TimeCompare(td.ts, than.Index())
 	}
@@ -149,8 +149,8 @@ func (k *KBarWindow) Values() []Trade {
 	return values
 }
 
-func (k *KBarWindow) Series() []pipeline.Sequence[time.Time, Trade] {
-	series := make([]pipeline.Sequence[time.Time, Trade], len(k.data))
+func (k *KBarWindow) Series() []Sequence[time.Time, Trade] {
+	series := make([]Sequence[time.Time, Trade], len(k.data))
 
 	for idx, td := range k.data {
 		series[idx] = td
@@ -163,7 +163,7 @@ func (k *KBarWindow) Series() []pipeline.Sequence[time.Time, Trade] {
 	return series
 }
 
-func (k *KBarWindow) Push(v pipeline.Sequence[time.Time, Trade]) error {
+func (k *KBarWindow) Push(v Sequence[time.Time, Trade]) error {
 	if v == nil {
 		return nil
 	}
@@ -259,7 +259,7 @@ func (k *KBarWindow) IsWarterMark() bool {
 	return k.index.UnixMilli()%500 == 0
 }
 
-func (k *KBarWindow) Compare(than pipeline.Sequence[time.Time, KBar]) int {
+func (k *KBarWindow) Compare(than Sequence[time.Time, KBar]) int {
 	return core.TimeCompare(k.index, than.Index())
 }
 
@@ -276,7 +276,7 @@ func NewKBarStream(ctx context.Context, name string, preSettle float64, gap time
 
 		stream.aggregator = func(
 			w Window[time.Time, Trade, time.Time, KBar],
-		) (pipeline.Sequence[time.Time, KBar], error) {
+		) (Sequence[time.Time, KBar], error) {
 			if bar, ok := w.(*KBarWindow); ok {
 				return bar, nil
 			} else {
