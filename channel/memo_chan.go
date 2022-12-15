@@ -80,7 +80,6 @@ func (ch *MemoChannel[T]) Init(ctx context.Context, name string, extraInit func(
 
 		go ch.inputDispatcher()
 	})
-
 }
 
 func (ch *MemoChannel[T]) ID() uuid.UUID {
@@ -93,18 +92,23 @@ func (ch *MemoChannel[T]) Name() string {
 
 func (ch *MemoChannel[T]) Release() {
 	ch.releaseOnce.Do(func() {
+		log.Printf("Releasing memo channel: %s[%+v]", ch.name, ch.id)
 		ch.cancelFn()
 
+		log.Printf("Disconnecting upstreams.")
 		ch.disconnectUpstream()
 
 		ch.upstreamWg.Wait()
 
+		log.Printf("Closing input channel.")
 		close(ch.input)
 	})
 }
 
 func (ch *MemoChannel[T]) disconnectUpstream() {
 	ch.upstreamCache.Range(func(key, value any) bool {
+		defer ch.upstreamCache.Delete(key)
+
 		subID, ok := key.(uuid.UUID)
 
 		if !ok {
@@ -120,6 +124,8 @@ func (ch *MemoChannel[T]) disconnectUpstream() {
 
 		if err := upstream.UnSubscribe(subID); err != nil {
 			log.Printf("UnSubscribe from upstream[%s] failed: %v", upstream.ID(), err)
+		} else {
+			log.Printf("Upstream %s[%+v] disconnected.", upstream.Name(), upstream.ID())
 		}
 
 		return true
@@ -128,14 +134,16 @@ func (ch *MemoChannel[T]) disconnectUpstream() {
 
 func (ch *MemoChannel[T]) closeSubs() {
 	ch.subscriberCache.Range(func(subscriber, subData any) bool {
-		pubCh := subData.(*sub[T])
-		ch.subscriberCache.Delete(subscriber)
+		defer func() {
+			ch.subscriberCache.Delete(subscriber)
+			ch.subscriberWg.Done()
+		}()
 
-		log.Printf("Closing pub channel for subscriber: %s", subscriber.(uuid.UUID))
+		if pubCh, ok := subData.(*sub[T]); ok {
+			log.Printf("Closing pub channel for subscriber: %s", subscriber.(uuid.UUID))
 
-		pubCh.close()
-
-		ch.subscriberWg.Done()
+			pubCh.close()
+		}
 
 		return true
 	})
@@ -187,10 +195,10 @@ func (ch *MemoChannel[T]) Subscribe(name string, resumeType core.ResumeType) (uu
 	subData, subExist := ch.subscriberCache.LoadOrStore(subID, &sub[T]{data: ch.makeChan()})
 
 	if subExist {
-		log.Printf("Channel exist for subscriber[%v]", name)
+		log.Printf("Channel exist for subscriber %s[%+v]", name, subID)
 	} else {
 		ch.subscriberWg.Add(1)
-		log.Printf("New subscriber[%+v]", name)
+		log.Printf("New subscriber %s[%+v]", name, subID)
 	}
 
 	return subID, subData.(*sub[T]).ch()

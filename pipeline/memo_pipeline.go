@@ -67,7 +67,10 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) Release() {
 	})
 }
 
-func (pipe *MemoPipeLine[IS, IV, OS, OV]) Init(ctx context.Context, name string, extraInit func()) {
+func (pipe *MemoPipeLine[IS, IV, OS, OV]) Init(
+	ctx context.Context, name string,
+	extraInit func(),
+) {
 	pipe.initOnce.Do(func() {
 		if ctx == nil {
 			ctx = context.Background()
@@ -81,8 +84,12 @@ func (pipe *MemoPipeLine[IS, IV, OS, OV]) Init(ctx context.Context, name string,
 
 		pipe.name = core.GenName(name)
 		pipe.id = core.GenID(pipe.name)
-		pipe.inputChan = channel.NewMemoChannel[Sequence[IS, IV]](ctx, name+"_input", 0)
-		pipe.outputChan = channel.NewMemoChannel[Sequence[OS, OV]](ctx, name+"_output", 0)
+
+		// use seperate context to prevent exit same time
+		pipe.inputChan = channel.NewMemoChannel[Sequence[IS, IV]](
+			context.Background(), name+"_input", 0)
+		pipe.outputChan = channel.NewMemoChannel[Sequence[OS, OV]](
+			context.Background(), name+"_output", 0)
 
 		if extraInit != nil {
 			extraInit()
