@@ -59,6 +59,7 @@ func (pipe *MemoPipeLine[IV, OV]) Join() {
 func (pipe *MemoPipeLine[IV, OV]) Release() {
 	pipe.releaseOnce.Do(func() {
 		pipe.cancelFn()
+
 		pipe.inputChan.Release()
 	})
 }
@@ -149,7 +150,7 @@ func (pipe *MemoPipeLine[IV, OV]) PipelineUpStream(src core.Consumer[IV]) error 
 				return
 			case v, ok := <-upChan:
 				if !ok {
-					log.Printf("upstream[%s] chan closed", src.Name())
+					log.Printf("Upstream %s[%+v] chan closed", src.Name(), src.ID())
 					return
 				}
 

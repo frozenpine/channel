@@ -2,10 +2,8 @@ package stream
 
 import (
 	"context"
-	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/frozenpine/msgqueue/core"
@@ -21,8 +19,8 @@ const (
 )
 
 var (
-	tradeSequencePool = sync.Pool{New: func() any { return &TradeSequence{} }}
-	kbarSequencePool  = sync.Pool{New: func() any { return &KBarWindow{} }}
+// tradeSequencePool = sync.Pool{New: func() any { return &TradeSequence{} }}
+// kbarSequencePool  = sync.Pool{New: func() any { return &KBarWindow{} }}
 )
 
 type Trade interface {
@@ -39,14 +37,18 @@ type TradeSequence struct {
 }
 
 func NewTradeSequence(v Trade) *TradeSequence {
-	result := tradeSequencePool.Get().(*TradeSequence)
+	// result := tradeSequencePool.Get().(*TradeSequence)
+	result := TradeSequence{
+		Trade: v,
+		ts:    time.Now(),
+	}
 
-	result.Trade = v
-	result.ts = time.Now()
+	// result.Trade = v
+	// result.ts = time.Now()
 
-	runtime.SetFinalizer(result, tradeSequencePool.Put)
+	// runtime.SetFinalizer(result, tradeSequencePool.Put)
 
-	return result
+	return &result
 }
 
 func (td *TradeSequence) Index() time.Time {
@@ -96,13 +98,14 @@ func NewKBarWindow(preBar *KBarWindow, preSettle float64, gap time.Duration) *KB
 
 	gap = gap.Round(Min1BarGap)
 
-	bar := kbarSequencePool.Get().(*KBarWindow)
+	// bar := kbarSequencePool.Get().(*KBarWindow)
+	bar := KBarWindow{
+		preBar:    preBar,
+		preSettle: preSettle,
+		precise:   gap,
+	}
 
-	bar.preBar = preBar
-	bar.preSettle = preSettle
-	bar.precise = gap
-
-	if bar.preBar != nil {
+	if preBar != nil {
 		bar.index = preBar.index.Add(gap)
 	} else {
 		now := time.Now()
@@ -114,11 +117,11 @@ func NewKBarWindow(preBar *KBarWindow, preSettle float64, gap time.Duration) *KB
 	}
 
 	// to prevent dirty data in history
-	bar.data = bar.data[:0]
+	// bar.data = bar.data[:0]
 
-	runtime.SetFinalizer(bar, kbarSequencePool.Put)
+	// runtime.SetFinalizer(bar, kbarSequencePool.Put)
 
-	return bar
+	return &bar
 }
 
 func (k *KBarWindow) Indexs() []time.Time {
@@ -270,8 +273,11 @@ type KBarStream struct {
 func NewKBarStream(ctx context.Context, name string, preSettle float64, gap time.Duration) *KBarStream {
 	stream := KBarStream{}
 
-	stream.Init(ctx, name, func() {
-		stream.pipeline = pipeline.NewMemoPipeLine(ctx, name, stream.convert)
+	stream.MemoStream.Init(ctx, name, func() {
+		stream.pipeline = pipeline.NewMemoPipeLine(
+			context.Background(),
+			"KBarStream_pipeline", stream.convert)
+
 		stream.currWindow = NewKBarWindow(nil, preSettle, Min1BarGap)
 
 		stream.aggregator = func(

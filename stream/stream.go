@@ -57,3 +57,48 @@ type Stream[
 	PreWindow(n int) Window[IS, IV, OS, OV]
 	CurrWindow() Window[IS, IV, OS, OV]
 }
+
+type DefaultWindow[
+	IS, IV any,
+	OS, OV any,
+] struct {
+	sequence []Sequence[IS, IV]
+}
+
+func (win *DefaultWindow[IS, IV, OS, OV]) Indexs() []IS {
+	index := make([]IS, len(win.sequence))
+
+	for idx, v := range win.sequence {
+		index[idx] = v.Index()
+	}
+
+	return index
+}
+
+func (win *DefaultWindow[IS, IV, OS, OV]) Values() []IV {
+	values := make([]IV, len(win.sequence))
+
+	for idx, v := range win.sequence {
+		values[idx] = v.Value()
+	}
+
+	return values
+}
+
+func (win *DefaultWindow[IS, IV, OS, OV]) Series() []Sequence[IS, IV] {
+	return win.sequence
+}
+
+func (win *DefaultWindow[IS, IV, OS, OV]) Push(seq Sequence[IS, IV]) error {
+	win.sequence = append(win.sequence, seq)
+
+	if seq.IsWaterMark() {
+		return ErrFutureTick
+	}
+
+	return nil
+}
+
+func (win *DefaultWindow[IS, IV, OS, OV]) NextWindow() Window[IS, IV, OS, OV] {
+	return &DefaultWindow[IS, IV, OS, OV]{}
+}

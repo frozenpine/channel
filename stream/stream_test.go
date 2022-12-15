@@ -2,7 +2,6 @@ package stream
 
 import (
 	"context"
-	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -54,57 +53,82 @@ func (td *trade) Price() float64       { return td.price }
 func (td *trade) Volume() int          { return td.volume }
 func (td *trade) TradeTime() time.Time { return td.ts }
 
-func TestKBarStream(t *testing.T) {
-	gap := time.Millisecond * 500
-	tradePrice := []float64{
-		1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000,
-	}
-	priceLen := len(tradePrice)
-	src := rand.NewSource(time.Now().UnixNano())
+type sequence[V int | float64] struct {
+	data V
+	ts   time.Time
+	mark bool
+}
 
-	stream := NewKBarStream(context.TODO(), "test", 10000.0, Min1BarGap)
+func (s *sequence[V]) Value() V         { return s.data }
+func (s *sequence[V]) Index() time.Time { return s.ts }
+func (s *sequence[V]) Compare(than Sequence[time.Time, V]) int {
+	v := s.data - than.Value()
+
+	switch {
+	case v > 0:
+		return 1
+	case v < 0:
+		return -1
+	default:
+		return 0
+	}
+}
+func (s *sequence[V]) IsWaterMark() bool { return s.mark }
+
+func TestMemoStream(t *testing.T) {
+	stream, err := NewMemoStream[
+		time.Time, int,
+		time.Time, float64,
+		string,
+	](
+		context.TODO(), "MemoStream", nil,
+		func(in Window[
+			time.Time, int,
+			time.Time, float64,
+		]) (Sequence[time.Time, float64], error) {
+			var result float64
+
+			for _, v := range in.Series() {
+				result += float64(v.Value()) * 0.5
+			}
+
+			return &sequence[float64]{data: result, ts: time.Now()}, nil
+		},
+	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	wg := sync.WaitGroup{}
-	wg.Add(1)
 
+	wg.Add(1)
 	go func() {
-		subID, ch := stream.Subscribe("kbar_consumer", core.Quick)
+		subID, ch := stream.Subscribe("test1", core.Quick)
 
 		defer func() {
 			stream.UnSubscribe(subID)
 			wg.Done()
 		}()
 
-		for bar := range ch {
-			t.Log("BAR:", bar)
+		for out := range ch {
+			t.Log(out.Index(), out.Value())
 		}
 	}()
 
-	tdList := []Trade{}
-	now := time.Now()
-
+	<-time.After(time.Second)
 	for idx := 0; idx < 200; idx++ {
-		v := int(src.Int63()) % priceLen
-		td := trade{
-			price:  tradePrice[v],
-			volume: v,
-			ts:     now.Add(gap * time.Duration(idx)),
+		if err := stream.Publish(&sequence[int]{
+			data: idx,
+			ts:   time.Now(),
+			mark: idx%3 == 0,
+		}, -1); err != nil {
+			t.Fatal(err)
 		}
-
-		tdList = append(tdList, &td)
-
-		seq := NewTradeSequence(&td)
-		seq.ts = td.ts
-
-		stream.Publish(seq, -1)
 	}
 
 	stream.Release()
 	stream.Join()
 
 	wg.Wait()
-
-	for _, v := range tdList {
-		t.Log("TD:", v)
-	}
 }

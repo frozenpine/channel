@@ -13,51 +13,6 @@ import (
 	"github.com/gofrs/uuid"
 )
 
-type DefaultWindow[
-	IS, IV any,
-	OS, OV any,
-] struct {
-	sequence []Sequence[IS, IV]
-}
-
-func (win *DefaultWindow[IS, IV, OS, OV]) Indexs() []IS {
-	index := make([]IS, len(win.sequence))
-
-	for idx, v := range win.sequence {
-		index[idx] = v.Index()
-	}
-
-	return index
-}
-
-func (win *DefaultWindow[IS, IV, OS, OV]) Values() []IV {
-	values := make([]IV, len(win.sequence))
-
-	for idx, v := range win.sequence {
-		values[idx] = v.Value()
-	}
-
-	return values
-}
-
-func (win *DefaultWindow[IS, IV, OS, OV]) Series() []Sequence[IS, IV] {
-	return win.sequence
-}
-
-func (win *DefaultWindow[IS, IV, OS, OV]) Push(seq Sequence[IS, IV]) error {
-	if seq.IsWaterMark() {
-		return ErrFutureTick
-	}
-
-	win.sequence = append(win.sequence, seq)
-
-	return nil
-}
-
-func (win *DefaultWindow[IS, IV, OS, OV]) NextWindow() Window[IS, IV, OS, OV] {
-	return &DefaultWindow[IS, IV, OS, OV]{}
-}
-
 type MemoStream[
 	IS, IV any,
 	OS, OV any,
@@ -92,13 +47,20 @@ func NewMemoStream[
 	}
 	stream := MemoStream[IS, IV, OS, OV, KEY]{}
 
+	log.Print("NewMemoStream")
+
 	stream.Init(ctx, name, func() {
+		log.Print("MemoStream extraInit")
+
 		if initWin == nil {
 			initWin = &DefaultWindow[IS, IV, OS, OV]{}
 		}
 
-		stream.pipeline = pipeline.NewMemoPipeLine(ctx, name, stream.convert)
+		stream.pipeline = pipeline.NewMemoPipeLine(
+			context.Background(),
+			stream.name+"_pipeline", stream.convert)
 		stream.currWindow = initWin
+		stream.aggregator = agg
 	})
 
 	return &stream, nil
@@ -107,7 +69,7 @@ func NewMemoStream[
 func (strm *MemoStream[IS, IV, OS, OV, KEY]) convert(inData Sequence[IS, IV], outChan core.Producer[Sequence[OS, OV]]) error {
 	err := strm.currWindow.Push(inData)
 
-	switch errors.Unwrap(err) {
+	switch err {
 	case ErrFutureTick:
 		result, err := strm.aggregator(strm.currWindow)
 
@@ -138,6 +100,7 @@ func (strm *MemoStream[IS, IV, OS, OV, KEY]) Name() string {
 
 func (strm *MemoStream[IS, IV, OS, OV, KEY]) Init(ctx context.Context, name string, extraInit func()) {
 	strm.initOnce.Do(func() {
+		log.Print("MemoStream Init")
 		if ctx == nil {
 			ctx = context.Background()
 		}
@@ -146,6 +109,7 @@ func (strm *MemoStream[IS, IV, OS, OV, KEY]) Init(ctx context.Context, name stri
 			name = "MemoStream"
 		}
 
+		strm.runCtx, strm.cancelFn = context.WithCancel(ctx)
 		strm.name = core.GenName(name)
 		strm.id = core.GenID(strm.name)
 
