@@ -70,7 +70,7 @@ func (strm *MemoStream[IDX, IV, OV, KEY]) convert(inData Sequence[IDX, IV], outC
 	err := strm.currWindow.Push(inData)
 
 	switch err {
-	case ErrFutureTick:
+	case ErrWindowClosed:
 		result, err := strm.aggregator(strm.currWindow)
 
 		if err != nil {

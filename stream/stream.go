@@ -88,11 +88,11 @@ func (win *DefaultWindow[IDX, IV, OV]) Series() []Sequence[IDX, IV] {
 }
 
 func (win *DefaultWindow[IDX, IV, OV]) Push(seq Sequence[IDX, IV]) error {
-	win.sequence = append(win.sequence, seq)
-
 	if seq.IsWaterMark() {
-		return ErrFutureTick
+		return ErrWindowClosed
 	}
+
+	win.sequence = append(win.sequence, seq)
 
 	return nil
 }

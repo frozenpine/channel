@@ -42,17 +42,6 @@ func TestKBarIndex(t *testing.T) {
 	}
 }
 
-type trade struct {
-	price  float64
-	volume int
-	ts     time.Time
-}
-
-func (td *trade) Identity() string     { return td.ts.Format("2006-01-02 15:04:05.000") }
-func (td *trade) Price() float64       { return td.price }
-func (td *trade) Volume() int          { return td.volume }
-func (td *trade) TradeTime() time.Time { return td.ts }
-
 type sequence[V int | float64] struct {
 	data V
 	ts   time.Time
@@ -129,4 +118,19 @@ func TestMemoStream(t *testing.T) {
 	stream.Join()
 
 	wg.Wait()
+}
+
+type trade struct {
+	price  float64
+	volume int
+	ts     time.Time
+}
+
+func (td *trade) Identity() string     { return td.ts.Format("2006-01-02 15:04:05.000") }
+func (td *trade) Price() float64       { return td.price }
+func (td *trade) Volume() int          { return td.volume }
+func (td *trade) TradeTime() time.Time { return td.ts }
+
+func TestKBar(t *testing.T) {
+
 }
