@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -11,9 +12,18 @@ import (
 )
 
 func TestErrCheck(t *testing.T) {
-	err := errors.Wrap(ErrFutureTick, "test")
+	if !errors.Is(ErrWindowClosed, ErrWindowClosed) {
+		t.Fatal("base error")
+	}
 
-	if !errors.Is(err, ErrFutureTick) {
+	err := errors.Wrap(ErrWindowClosed, "clise")
+
+	if !errors.Is(err, ErrWindowClosed) {
+		t.Fatal(err)
+	}
+
+	err = errors.Wrap(ErrHistorySequence, "history")
+	if !errors.Is(err, ErrHistorySequence) {
 		t.Fatal(err)
 	}
 }
@@ -104,13 +114,22 @@ func TestMemoStream(t *testing.T) {
 	}()
 
 	<-time.After(time.Second)
+
 	for idx := 0; idx < 200; idx++ {
-		if err := stream.Publish(&sequence[int]{
+		if idx%3 == 2 {
+			if err = stream.Publish(&sequence[int]{
+				ts:   time.Now(),
+				mark: true,
+			}, -1); err != nil {
+				t.Fatalf("input water mark failed: %+v", err)
+			}
+		}
+
+		if err = stream.Publish(&sequence[int]{
 			data: idx,
 			ts:   time.Now(),
-			mark: idx%3 == 0,
 		}, -1); err != nil {
-			t.Fatal(err)
+			t.Fatalf("input data failed: %+v", err)
 		}
 	}
 
@@ -132,5 +151,62 @@ func (td *trade) Volume() int          { return td.volume }
 func (td *trade) TradeTime() time.Time { return td.ts }
 
 func TestKBar(t *testing.T) {
+	priceList := []float64{
+		1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008,
+		1009, 1010, 1011, 1012, 1013, 1014, 1015,
+	}
+	priceLen := len(priceList)
 
+	src := rand.NewSource(time.Now().UnixNano())
+
+	stream := NewKBarStream(context.TODO(), "Kbar", 1006, Min1BarGap)
+	wg := sync.WaitGroup{}
+
+	wg.Add(1)
+	go func() {
+		subID, ch := stream.Subscribe("test", core.Quick)
+
+		defer func() {
+			stream.UnSubscribe(subID)
+			wg.Done()
+		}()
+
+		for seq := range ch {
+			bar := seq.Value()
+
+			t.Log(
+				seq.Index().Format("2006-01-02 15:04:05.000"),
+				bar.Volume(),
+				bar.Open(), bar.High(),
+				bar.Low(), bar.Close(),
+			)
+		}
+	}()
+
+	var multple time.Duration = 0
+
+	for idx := 0; idx < 100; idx++ {
+		if idx%3 == 2 {
+			multple++
+		}
+
+		price := priceList[src.Int63()%int64(priceLen)]
+
+		td := trade{
+			price:  price,
+			volume: 1,
+			ts:     time.Now().Add(Min1BarGap * multple),
+		}
+
+		tds := NewTradeSequence(&td)
+
+		if err := stream.Publish(tds, -1); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stream.Release()
+	stream.Join()
+
+	wg.Wait()
 }

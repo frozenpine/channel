@@ -2,8 +2,11 @@ package stream
 
 import (
 	"context"
+	"log"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/frozenpine/msgqueue/core"
@@ -19,8 +22,8 @@ const (
 )
 
 var (
-// tradeSequencePool = sync.Pool{New: func() any { return &TradeSequence{} }}
-// kbarSequencePool  = sync.Pool{New: func() any { return &KBarWindow{} }}
+	tradeSequencePool = sync.Pool{New: func() any { return &TradeSequence{} }}
+	kbarSequencePool  = sync.Pool{New: func() any { return &KBarWindow{} }}
 )
 
 type Trade interface {
@@ -37,38 +40,39 @@ type TradeSequence struct {
 }
 
 func NewTradeSequence(v Trade) *TradeSequence {
-	// result := tradeSequencePool.Get().(*TradeSequence)
-	result := TradeSequence{
-		Trade: v,
-		ts:    time.Now(),
+	result := tradeSequencePool.Get().(*TradeSequence)
+	// result := TradeSequence{
+	// 	Trade: v,
+	// 	ts:    time.Now(),
+	// }
+
+	result.Trade = v
+	result.ts = time.Now()
+
+	runtime.SetFinalizer(result, tradeSequencePool.Put)
+
+	return result
+	// return &result
+}
+
+func (tds *TradeSequence) Index() time.Time {
+	return tds.ts
+}
+
+func (tds *TradeSequence) Value() Trade {
+	return tds.Trade
+}
+
+func (tds *TradeSequence) Compare(than Sequence[time.Time, Trade]) int {
+	if tds.IsWaterMark() || than.IsWaterMark() {
+		return core.TimeCompare(tds.ts, than.Index())
 	}
 
-	// result.Trade = v
-	// result.ts = time.Now()
-
-	// runtime.SetFinalizer(result, tradeSequencePool.Put)
-
-	return &result
+	return strings.Compare(tds.Trade.Identity(), than.Value().Identity())
 }
 
-func (td *TradeSequence) Index() time.Time {
-	return td.ts
-}
-
-func (td *TradeSequence) Value() Trade {
-	return td.Trade
-}
-
-func (td *TradeSequence) Compare(than Sequence[time.Time, Trade]) int {
-	if td.IsWaterMark() || than.IsWaterMark() {
-		return core.TimeCompare(td.ts, than.Index())
-	}
-
-	return strings.Compare(td.Trade.Identity(), than.Value().Identity())
-}
-
-func (td *TradeSequence) IsWaterMark() bool {
-	return td.Trade == nil
+func (tds *TradeSequence) IsWaterMark() bool {
+	return tds.Trade == nil
 }
 
 type KBar interface {
@@ -98,12 +102,12 @@ func NewKBarWindow(preBar *KBarWindow, preSettle float64, gap time.Duration) *KB
 
 	gap = gap.Round(Min1BarGap)
 
-	// bar := kbarSequencePool.Get().(*KBarWindow)
-	bar := KBarWindow{
-		preBar:    preBar,
-		preSettle: preSettle,
-		precise:   gap,
-	}
+	bar := kbarSequencePool.Get().(*KBarWindow)
+	// bar := KBarWindow{
+	// 	preBar:    preBar,
+	// 	preSettle: preSettle,
+	// 	precise:   gap,
+	// }
 
 	if preBar != nil {
 		bar.index = preBar.index.Add(gap)
@@ -117,11 +121,12 @@ func NewKBarWindow(preBar *KBarWindow, preSettle float64, gap time.Duration) *KB
 	}
 
 	// to prevent dirty data in history
-	// bar.data = bar.data[:0]
+	bar.data = bar.data[:0]
 
-	// runtime.SetFinalizer(bar, kbarSequencePool.Put)
+	runtime.SetFinalizer(bar, kbarSequencePool.Put)
 
-	return &bar
+	return bar
+	// return &bar
 }
 
 func (k *KBarWindow) Indexs() []time.Time {
@@ -145,7 +150,7 @@ func (k *KBarWindow) Values() []Trade {
 		values[idx] = td
 	}
 
-	sort.Slice(values, func(i, j int) bool {
+	sort.SliceStable(values, func(i, j int) bool {
 		return strings.Compare(values[i].Identity(), values[j].Identity()) < 0
 	})
 
@@ -171,14 +176,40 @@ func (k *KBarWindow) Push(v Sequence[time.Time, Trade]) error {
 		return nil
 	}
 
+	if v.IsWaterMark() {
+		return errors.Wrap(ErrWindowClosed, "water mark arrive")
+	}
+
 	td := v.Value()
 
 	if core.TimeCompare(k.index, td.TradeTime()) < 0 {
-		return errors.Wrap(ErrFutureTick, "trade ts after current bar")
+		return errors.Wrap(ErrWindowClosed, "trade ts after current bar")
 	}
 
 	if core.TimeCompare(k.index.Add(-k.precise), td.TradeTime()) >= 0 {
-		return errors.Wrap(ErrHistoryTick, "trade ts before current bar")
+		// 根据链表回溯历史流的窗口
+		if k.preBar != nil {
+			err := k.preBar.Push(v)
+
+			switch {
+			case errors.Is(err, ErrWindowClosed):
+				log.Printf(
+					"There is a bar gap in history stream: %+v, %+v, %+v",
+					td.TradeTime(), k.preBar.Index(), k.Index(),
+				)
+			case errors.Is(err, ErrHistorySequence):
+				log.Printf(
+					"Trade ts before stream start: %+v, %+v",
+					td.TradeTime(), k.preBar.Index(),
+				)
+			default:
+				log.Printf("Unknown error occoured in stream retrace: %+v", err)
+			}
+
+			return nil
+		}
+
+		return errors.Wrap(ErrHistorySequence, "trade ts before current bar")
 	}
 
 	k.data = append(k.data, v.(*TradeSequence))

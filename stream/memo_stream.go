@@ -69,8 +69,8 @@ func NewMemoStream[
 func (strm *MemoStream[IDX, IV, OV, KEY]) convert(inData Sequence[IDX, IV], outChan core.Producer[Sequence[IDX, OV]]) error {
 	err := strm.currWindow.Push(inData)
 
-	switch err {
-	case ErrWindowClosed:
+	switch {
+	case errors.Is(err, ErrWindowClosed):
 		result, err := strm.aggregator(strm.currWindow)
 
 		if err != nil {
@@ -79,15 +79,20 @@ func (strm *MemoStream[IDX, IV, OV, KEY]) convert(inData Sequence[IDX, IV], outC
 
 		if err = outChan.Publish(result, -1); err != nil {
 			log.Printf("Stream out failed: +%v", err)
+			return err
 		}
 
 		strm.windowCache = append(strm.windowCache, strm.currWindow)
 		strm.currWindow = strm.currWindow.NextWindow()
+
+		return nil
+	case errors.Is(err, ErrHistorySequence):
+		log.Printf("History sequence[%v] arrived: %+v", inData.Index(), inData.Value())
+
+		return nil
 	default:
 		return err
 	}
-
-	return nil
 }
 
 func (strm *MemoStream[IDX, IV, OV, KEY]) ID() uuid.UUID {

@@ -7,10 +7,9 @@ import (
 )
 
 var (
-	ErrFutureTick        = errors.New("future tick")
-	ErrHistoryTick       = errors.New("history tick")
 	ErrInvalidAggregator = errors.New("invalid aggregator")
 	ErrWindowClosed      = errors.New("window closed")
+	ErrHistorySequence   = errors.New("history sequence")
 )
 
 type Sequence[IDX comparable, V any] interface {
@@ -34,6 +33,8 @@ type Window[
 	Indexs() []IDX
 	Values() []IV
 	Series() []Sequence[IDX, IV]
+	// Push if window change, error must be an Wrap of
+	// ErrWindowClosed or ErrHistorySequence
 	Push(Sequence[IDX, IV]) error
 	PreWindow() Window[IDX, IV, OV]
 	NextWindow() Window[IDX, IV, OV]
@@ -89,7 +90,7 @@ func (win *DefaultWindow[IDX, IV, OV]) Series() []Sequence[IDX, IV] {
 
 func (win *DefaultWindow[IDX, IV, OV]) Push(seq Sequence[IDX, IV]) error {
 	if seq.IsWaterMark() {
-		return ErrWindowClosed
+		return errors.Wrap(ErrWindowClosed, "water mark arrive")
 	}
 
 	win.sequence = append(win.sequence, seq)
