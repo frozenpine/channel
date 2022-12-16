@@ -14,8 +14,8 @@ import (
 )
 
 type MemoStream[
-	IS, IV any,
-	OS, OV any,
+	IDX comparable,
+	IV, OV any,
 	KEY comparable,
 ] struct {
 	name     string
@@ -25,27 +25,27 @@ type MemoStream[
 
 	initOnce, releaseOnce sync.Once
 
-	pipeline pipeline.Pipeline[Sequence[IS, IV], Sequence[OS, OV]]
+	pipeline pipeline.Pipeline[Sequence[IDX, IV], Sequence[IDX, OV]]
 
-	windowCache []Window[IS, IV, OS, OV]
-	currWindow  Window[IS, IV, OS, OV]
+	windowCache []Window[IDX, IV, OV]
+	currWindow  Window[IDX, IV, OV]
 
-	aggregator Aggregator[IS, IV, OS, OV]
+	aggregator Aggregator[IDX, IV, OV]
 }
 
 func NewMemoStream[
-	IS, IV any,
-	OS, OV any,
+	IDX comparable,
+	IV, OV any,
 	KEY comparable,
 ](
 	ctx context.Context, name string,
-	initWin Window[IS, IV, OS, OV],
-	agg Aggregator[IS, IV, OS, OV],
-) (*MemoStream[IS, IV, OS, OV, KEY], error) {
+	initWin Window[IDX, IV, OV],
+	agg Aggregator[IDX, IV, OV],
+) (*MemoStream[IDX, IV, OV, KEY], error) {
 	if agg == nil {
 		return nil, errors.Wrap(ErrInvalidAggregator, "aggregator missing")
 	}
-	stream := MemoStream[IS, IV, OS, OV, KEY]{}
+	stream := MemoStream[IDX, IV, OV, KEY]{}
 
 	log.Print("NewMemoStream")
 
@@ -53,7 +53,7 @@ func NewMemoStream[
 		log.Print("MemoStream extraInit")
 
 		if initWin == nil {
-			initWin = &DefaultWindow[IS, IV, OS, OV]{}
+			initWin = &DefaultWindow[IDX, IV, OV]{}
 		}
 
 		stream.pipeline = pipeline.NewMemoPipeLine(
@@ -66,7 +66,7 @@ func NewMemoStream[
 	return &stream, nil
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) convert(inData Sequence[IS, IV], outChan core.Producer[Sequence[OS, OV]]) error {
+func (strm *MemoStream[IDX, IV, OV, KEY]) convert(inData Sequence[IDX, IV], outChan core.Producer[Sequence[IDX, OV]]) error {
 	err := strm.currWindow.Push(inData)
 
 	switch err {
@@ -90,15 +90,15 @@ func (strm *MemoStream[IS, IV, OS, OV, KEY]) convert(inData Sequence[IS, IV], ou
 	return nil
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) ID() uuid.UUID {
+func (strm *MemoStream[IDX, IV, OV, KEY]) ID() uuid.UUID {
 	return strm.id
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) Name() string {
+func (strm *MemoStream[IDX, IV, OV, KEY]) Name() string {
 	return strm.name
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) Init(ctx context.Context, name string, extraInit func()) {
+func (strm *MemoStream[IDX, IV, OV, KEY]) Init(ctx context.Context, name string, extraInit func()) {
 	strm.initOnce.Do(func() {
 		log.Print("MemoStream Init")
 		if ctx == nil {
@@ -119,7 +119,7 @@ func (strm *MemoStream[IS, IV, OS, OV, KEY]) Init(ctx context.Context, name stri
 	})
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) Join() {
+func (strm *MemoStream[IDX, IV, OV, KEY]) Join() {
 	<-strm.runCtx.Done()
 
 	strm.pipeline.Join()
@@ -127,7 +127,7 @@ func (strm *MemoStream[IS, IV, OS, OV, KEY]) Join() {
 	// TODO: extra join
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) Release() {
+func (strm *MemoStream[IDX, IV, OV, KEY]) Release() {
 	strm.releaseOnce.Do(func() {
 		strm.cancelFn()
 
@@ -136,22 +136,22 @@ func (strm *MemoStream[IS, IV, OS, OV, KEY]) Release() {
 	})
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) Publish(v Sequence[IS, IV], timeout time.Duration) error {
+func (strm *MemoStream[IDX, IV, OV, KEY]) Publish(v Sequence[IDX, IV], timeout time.Duration) error {
 	return strm.pipeline.Publish(v, timeout)
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) Subscribe(name string, resume core.ResumeType) (uuid.UUID, <-chan Sequence[OS, OV]) {
+func (strm *MemoStream[IDX, IV, OV, KEY]) Subscribe(name string, resume core.ResumeType) (uuid.UUID, <-chan Sequence[IDX, OV]) {
 	return strm.pipeline.Subscribe(name, resume)
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) UnSubscribe(subID uuid.UUID) error {
+func (strm *MemoStream[IDX, IV, OV, KEY]) UnSubscribe(subID uuid.UUID) error {
 	return strm.pipeline.UnSubscribe(subID)
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) PipelineUpstream(src core.Consumer[Sequence[IS, IV]]) error {
+func (strm *MemoStream[IDX, IV, OV, KEY]) PipelineUpstream(src core.Consumer[Sequence[IDX, IV]]) error {
 	return strm.pipeline.PipelineUpStream(src)
 }
 
-func (strm *MemoStream[IS, IV, OS, OV, KEY]) PipelineDownStream(dst core.Upstream[Sequence[OS, OV]]) error {
+func (strm *MemoStream[IDX, IV, OV, KEY]) PipelineDownStream(dst core.Upstream[Sequence[IDX, OV]]) error {
 	return strm.pipeline.PipelineDownStream(dst)
 }

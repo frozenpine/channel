@@ -82,7 +82,7 @@ type KBar interface {
 }
 
 type KBarWindow struct {
-	preBar      KBar
+	preBar      *KBarWindow
 	preSettle   float64
 	data        []*TradeSequence
 	totalVolume int
@@ -196,7 +196,11 @@ func (k *KBarWindow) Push(v Sequence[time.Time, Trade]) error {
 	return nil
 }
 
-func (k *KBarWindow) NextWindow() Window[time.Time, Trade, time.Time, KBar] {
+func (k *KBarWindow) PreWindow() Window[time.Time, Trade, KBar] {
+	return k.preBar
+}
+
+func (k *KBarWindow) NextWindow() Window[time.Time, Trade, KBar] {
 	return NewKBarWindow(k, k.preSettle, k.precise)
 }
 
@@ -267,7 +271,7 @@ func (k *KBarWindow) Compare(than Sequence[time.Time, KBar]) int {
 }
 
 type KBarStream struct {
-	MemoStream[time.Time, Trade, time.Time, KBar, string]
+	MemoStream[time.Time, Trade, KBar, string]
 }
 
 func NewKBarStream(ctx context.Context, name string, preSettle float64, gap time.Duration) *KBarStream {
@@ -281,7 +285,7 @@ func NewKBarStream(ctx context.Context, name string, preSettle float64, gap time
 		stream.currWindow = NewKBarWindow(nil, preSettle, Min1BarGap)
 
 		stream.aggregator = func(
-			w Window[time.Time, Trade, time.Time, KBar],
+			w Window[time.Time, Trade, KBar],
 		) (Sequence[time.Time, KBar], error) {
 			if bar, ok := w.(*KBarWindow); ok {
 				return bar, nil

@@ -77,14 +77,12 @@ func (s *sequence[V]) IsWaterMark() bool { return s.mark }
 
 func TestMemoStream(t *testing.T) {
 	stream, err := NewMemoStream[
-		time.Time, int,
-		time.Time, float64,
+		time.Time, int, float64,
 		string,
 	](
 		context.TODO(), "MemoStream", nil,
 		func(in Window[
-			time.Time, int,
-			time.Time, float64,
+			time.Time, int, float64,
 		]) (Sequence[time.Time, float64], error) {
 			var result float64
 

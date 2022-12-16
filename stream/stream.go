@@ -10,63 +10,61 @@ var (
 	ErrFutureTick        = errors.New("future tick")
 	ErrHistoryTick       = errors.New("history tick")
 	ErrInvalidAggregator = errors.New("invalid aggregator")
+	ErrWindowClosed      = errors.New("window closed")
 )
 
-type WaterMark interface {
+type Sequence[IDX comparable, V any] interface {
+	Value() V
+	Index() IDX
+
+	Compare(than Sequence[IDX, V]) int
+
 	IsWaterMark() bool
 }
 
-type Sequence[S, V any] interface {
-	Value() V
-	Index() S
-
-	Compare(than Sequence[S, V]) int
-
-	WaterMark
-}
-
 type Aggregator[
-	IS, IV any,
-	OS, OV any,
-] func(Window[IS, IV, OS, OV]) (Sequence[OS, OV], error)
+	IDX comparable,
+	IV, OV any,
+] func(Window[IDX, IV, OV]) (Sequence[IDX, OV], error)
 
 type Window[
-	IS, IV any,
-	OS, OV any,
+	IDX comparable,
+	IV, OV any,
 ] interface {
-	Indexs() []IS
+	Indexs() []IDX
 	Values() []IV
-	Series() []Sequence[IS, IV]
-	Push(Sequence[IS, IV]) error
-	NextWindow() Window[IS, IV, OS, OV]
+	Series() []Sequence[IDX, IV]
+	Push(Sequence[IDX, IV]) error
+	PreWindow() Window[IDX, IV, OV]
+	NextWindow() Window[IDX, IV, OV]
 }
 
 type Stream[
-	IS, IV any,
-	OS, OV any,
+	IDX comparable,
+	IV, OV any,
 	KEY comparable,
 ] interface {
-	pipeline.Pipeline[Sequence[IS, IV], Sequence[OS, OV]]
+	pipeline.Pipeline[Sequence[IDX, IV], Sequence[IDX, OV]]
 
-	WindowBy(func() <-chan WaterMark) Stream[IS, IV, OS, OV, KEY]
-	FilterBy(func(Sequence[IS, IV]) bool) Stream[IS, IV, OS, OV, KEY]
-	GroupBy(func(Sequence[IS, IV]) KEY) map[KEY]Stream[IS, IV, OS, OV, KEY]
+	FilterBy(func(Sequence[IDX, IV]) bool) Stream[IDX, IV, OV, KEY]
+	GroupBy(func(Sequence[IDX, IV]) KEY) map[KEY]Stream[IDX, IV, OV, KEY]
 
 	// PreWindow get n count previous window
 	// if n count <= 0, will return current window
-	PreWindow(n int) Window[IS, IV, OS, OV]
-	CurrWindow() Window[IS, IV, OS, OV]
+	PreWindow(n int) Window[IDX, IV, OV]
+	CurrWindow() Window[IDX, IV, OV]
 }
 
 type DefaultWindow[
-	IS, IV any,
-	OS, OV any,
+	IDX comparable,
+	IV, OV any,
 ] struct {
-	sequence []Sequence[IS, IV]
+	pre      Window[IDX, IV, OV]
+	sequence []Sequence[IDX, IV]
 }
 
-func (win *DefaultWindow[IS, IV, OS, OV]) Indexs() []IS {
-	index := make([]IS, len(win.sequence))
+func (win *DefaultWindow[IDX, IV, OV]) Indexs() []IDX {
+	index := make([]IDX, len(win.sequence))
 
 	for idx, v := range win.sequence {
 		index[idx] = v.Index()
@@ -75,7 +73,7 @@ func (win *DefaultWindow[IS, IV, OS, OV]) Indexs() []IS {
 	return index
 }
 
-func (win *DefaultWindow[IS, IV, OS, OV]) Values() []IV {
+func (win *DefaultWindow[IDX, IV, OV]) Values() []IV {
 	values := make([]IV, len(win.sequence))
 
 	for idx, v := range win.sequence {
@@ -85,11 +83,11 @@ func (win *DefaultWindow[IS, IV, OS, OV]) Values() []IV {
 	return values
 }
 
-func (win *DefaultWindow[IS, IV, OS, OV]) Series() []Sequence[IS, IV] {
+func (win *DefaultWindow[IDX, IV, OV]) Series() []Sequence[IDX, IV] {
 	return win.sequence
 }
 
-func (win *DefaultWindow[IS, IV, OS, OV]) Push(seq Sequence[IS, IV]) error {
+func (win *DefaultWindow[IDX, IV, OV]) Push(seq Sequence[IDX, IV]) error {
 	win.sequence = append(win.sequence, seq)
 
 	if seq.IsWaterMark() {
@@ -99,6 +97,12 @@ func (win *DefaultWindow[IS, IV, OS, OV]) Push(seq Sequence[IS, IV]) error {
 	return nil
 }
 
-func (win *DefaultWindow[IS, IV, OS, OV]) NextWindow() Window[IS, IV, OS, OV] {
-	return &DefaultWindow[IS, IV, OS, OV]{}
+func (win *DefaultWindow[IDX, IV, OV]) PreWindow() Window[IDX, IV, OV] {
+	return win.pre
+}
+
+func (win *DefaultWindow[IDX, IV, OV]) NextWindow() Window[IDX, IV, OV] {
+	return &DefaultWindow[IDX, IV, OV]{
+		pre: win,
+	}
 }

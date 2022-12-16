@@ -21,8 +21,7 @@ type Pipeline[
 }
 
 func NewPipeline[
-	IS, IV any,
-	OS, OV any,
+	IV, OV any,
 ](ctx context.Context, name string, cvt Converter[IV, OV]) (Pipeline[IV, OV], error) {
 	var typ core.Type = core.Memory
 
