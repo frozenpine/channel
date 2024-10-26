@@ -2,7 +2,7 @@ package stream
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"runtime"
 	"sort"
 	"strings"
@@ -193,17 +193,23 @@ func (k *KBarWindow) Push(v Sequence[time.Time, Trade]) error {
 
 			switch {
 			case errors.Is(err, ErrWindowClosed):
-				log.Printf(
-					"There is a bar gap in history stream: %+v, %+v, %+v",
-					td.TradeTime(), k.preBar.Index(), k.Index(),
+				slog.Warn(
+					"bar gap in history stream",
+					slog.Time("trade_time", td.TradeTime()),
+					slog.Time("pre_idx", k.preBar.Index()),
+					slog.Time("curr_idx", k.Index()),
 				)
 			case errors.Is(err, ErrHistorySequence):
-				log.Printf(
-					"Trade ts before stream start: %+v, %+v",
-					td.TradeTime(), k.preBar.Index(),
+				slog.Warn(
+					"trade ts before stream start",
+					slog.Time("trade_time", td.TradeTime()),
+					slog.Time("pre_idx", k.preBar.Index()),
 				)
 			default:
-				log.Printf("Unknown error occoured in stream retrace: %+v", err)
+				slog.Error(
+					"unkown error occoured in stream retrace",
+					slog.Any("error", err),
+				)
 			}
 
 			return nil

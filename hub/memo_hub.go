@@ -2,7 +2,7 @@ package hub
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 
 	"github.com/frozenpine/msgqueue/core"
@@ -74,7 +74,10 @@ func (hub *MemoHub) Release() {
 			topic := key.(string)
 			ch := value.(core.QueueBase)
 
-			log.Printf("Closing channel for topic: %s", topic)
+			slog.Info(
+				"closing channel for topic",
+				slog.String("topic", topic),
+			)
 			ch.Release()
 
 			return true

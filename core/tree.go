@@ -1,6 +1,8 @@
 package core
 
-import "log"
+import (
+	"log/slog"
+)
 
 type Color uint8
 
@@ -120,7 +122,7 @@ func (rbt *RBTree) Insert(no *Node) {
 		} else if x.Item.Less(no.Item) {
 			x = x.Right
 		} else {
-			log.Println("that node already exist")
+			slog.Warn("node already exist")
 		}
 	}
 
@@ -146,7 +148,8 @@ func (rbt *RBTree) insertFixup(no *Node) {
 				//
 				// 情形 4
 
-				log.Println("TRACE Do Case 4 :", no.Item)
+				slog.Debug("do cace 4",
+					slog.Any("item", no.Item))
 
 				no.Parent.color = BLACK
 				y.color = BLACK
@@ -157,14 +160,16 @@ func (rbt *RBTree) insertFixup(no *Node) {
 					//
 					// 情形 5 : 反向情形
 					// 直接左旋转 , 然后进行情形3(变色->右旋)
-					log.Println("TRACE Do Case 5 :", no.Item)
+					slog.Debug("do cace 5",
+						slog.Any("item", no.Item))
 
 					if no == no.Parent.Right {
 						no = no.Parent
 						rbt.LeftRotate(no)
 					}
 				}
-				log.Println("TRACE Do Case 6 :", no.Item)
+				slog.Debug("do cace 6",
+					slog.Any("item", no.Item))
 
 				no.Parent.color = BLACK
 				no.Parent.Parent.color = RED

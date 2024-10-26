@@ -2,7 +2,7 @@ package channel
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -92,15 +92,19 @@ func (ch *MemoChannel[T]) Name() string {
 
 func (ch *MemoChannel[T]) Release() {
 	ch.releaseOnce.Do(func() {
-		log.Printf("Releasing memo channel: %s[%+v]", ch.name, ch.id)
+		slog.Info(
+			"releasing mem channel",
+			slog.String("name", ch.name),
+			slog.String("id", ch.id.String()),
+		)
 		ch.cancelFn()
 
-		log.Printf("Disconnecting upstreams.")
+		slog.Info("disconnecting upstreams")
 		ch.disconnectUpstream()
 
 		ch.upstreamWg.Wait()
 
-		log.Printf("Closing input channel.")
+		slog.Info("closing input channel")
 		close(ch.input)
 	})
 }
@@ -112,20 +116,35 @@ func (ch *MemoChannel[T]) disconnectUpstream() {
 		subID, ok := key.(uuid.UUID)
 
 		if !ok {
-			log.Printf("Invalid upstream subID: %v", key)
+			slog.Error(
+				"invalid upstream sub id",
+				slog.Any("sub_key", key),
+			)
 			return true
 		}
 
 		upstream, ok := value.(core.Consumer[T])
 		if !ok {
-			log.Printf("Invalid upstream source: %v", value)
+			slog.Error(
+				"invalid upstream source",
+				slog.Any("source", value),
+			)
 			return true
 		}
 
 		if err := upstream.UnSubscribe(subID); err != nil {
-			log.Printf("UnSubscribe from upstream[%s] failed: %v", upstream.ID(), err)
+			slog.Error(
+				"unsubscribe from upstream failed",
+				slog.Any("error", err),
+				slog.String("name", upstream.Name()),
+				slog.String("id", upstream.ID().String()),
+			)
 		} else {
-			log.Printf("Upstream %s[%+v] disconnected.", upstream.Name(), upstream.ID())
+			slog.Info(
+				"upstream disconnected",
+				slog.String("name", upstream.Name()),
+				slog.String("id", upstream.ID().String()),
+			)
 		}
 
 		return true
@@ -140,7 +159,10 @@ func (ch *MemoChannel[T]) closeSubs() {
 		}()
 
 		if pubCh, ok := subData.(*sub[T]); ok {
-			log.Printf("Closing pub channel for subscriber: %s", subscriber.(uuid.UUID))
+			slog.Info(
+				"closing pub channel for subscriber",
+				slog.Any("sub", subscriber),
+			)
 
 			pubCh.close()
 		}
@@ -179,7 +201,10 @@ func (ch *MemoChannel[T]) inputDispatcher() {
 
 				select {
 				case <-ch.timeout(500 * time.Millisecond):
-					log.Printf("Publish timeout to subscriber[%+v].", subcriber)
+					slog.Warn(
+						"publish timeout to subscriber",
+						slog.Any("subscriber", subcriber),
+					)
 				case sub <- v:
 				}
 
@@ -195,10 +220,18 @@ func (ch *MemoChannel[T]) Subscribe(name string, resumeType core.ResumeType) (uu
 	subData, subExist := ch.subscriberCache.LoadOrStore(subID, &sub[T]{data: ch.makeChan()})
 
 	if subExist {
-		log.Printf("Channel exist for subscriber %s[%+v]", name, subID)
+		slog.Warn(
+			"channel exist for subscriber",
+			slog.String("name", name),
+			slog.String("sub_id", subID.String()),
+		)
 	} else {
 		ch.subscriberWg.Add(1)
-		log.Printf("New subscriber %s[%+v]", name, subID)
+		slog.Info(
+			"new subscriber add",
+			slog.String("name", name),
+			slog.String("sub_id", subID.String()),
+		)
 	}
 
 	return subID, subData.(*sub[T]).ch()
@@ -266,9 +299,10 @@ func (ch *MemoChannel[T]) PipelineUpStream(src core.Consumer[T]) error {
 					}
 
 					if err := ch.Publish(v, -1); err != nil {
-						log.Printf(
-							"Relay pipeline upstream %s failed: %+v",
-							core.QueueIdentity(src), err,
+						slog.Error(
+							"relay pipeline upstream failed",
+							slog.Any("error", err),
+							slog.String("identity", core.QueueIdentity(src)),
 						)
 					}
 				}

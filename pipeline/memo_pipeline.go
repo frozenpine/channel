@@ -2,7 +2,7 @@ package pipeline
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -98,12 +98,15 @@ func (pipe *MemoPipeLine[IV, OV]) Init(
 
 func (pipe *MemoPipeLine[IV, OV]) dispatcher() {
 	if pipe.converter == nil {
-		log.Panic("Input converter to output missing")
+		panic("input converter to output missing")
 	}
 
 	subID, upChan := pipe.inputChan.Subscribe(pipe.name, core.Quick)
 
-	log.Printf("Starting dispatcher from input to output: %+v", subID)
+	slog.Info(
+		"starting dispatcher from input to output",
+		slog.String("sub_id", subID.String()),
+	)
 
 	for {
 		select {
@@ -116,7 +119,10 @@ func (pipe *MemoPipeLine[IV, OV]) dispatcher() {
 			}
 
 			if err := pipe.converter(in, pipe.outputChan); err != nil {
-				log.Printf("Dispatch to output chan failed: %+v", err)
+				slog.Error(
+					"dispatch to output chan failed",
+					slog.Any("error", err),
+				)
 			}
 		}
 	}
@@ -150,12 +156,21 @@ func (pipe *MemoPipeLine[IV, OV]) PipelineUpStream(src core.Consumer[IV]) error 
 				return
 			case v, ok := <-upChan:
 				if !ok {
-					log.Printf("Upstream %s[%+v] chan closed", src.Name(), src.ID())
+					slog.Warn(
+						"upstream chan closed",
+						slog.String("name", src.Name()),
+						slog.String("id", src.ID().String()),
+					)
 					return
 				}
 
 				if err := pipe.inputChan.Publish(v, -1); err != nil {
-					log.Printf("Pipeline %s[%+v] upstream failed: +%v", pipe.name, pipe.id, err)
+					slog.Error(
+						"pipeline upstream failed",
+						slog.Any("error", err),
+						slog.String("name", pipe.name),
+						slog.String("id", pipe.id.String()),
+					)
 				}
 			}
 		}

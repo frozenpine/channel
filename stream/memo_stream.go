@@ -2,7 +2,7 @@ package stream
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -47,10 +47,10 @@ func NewMemoStream[
 	}
 	stream := MemoStream[IDX, IV, OV, KEY]{}
 
-	log.Print("NewMemoStream")
+	slog.Debug("creating new memo stream")
 
 	stream.Init(ctx, name, func() {
-		log.Print("MemoStream extraInit")
+		slog.Debug("memo stream extra init")
 
 		if initWin == nil {
 			initWin = &DefaultWindow[IDX, IV, OV]{}
@@ -78,7 +78,10 @@ func (strm *MemoStream[IDX, IV, OV, KEY]) convert(inData Sequence[IDX, IV], outC
 		}
 
 		if err = outChan.Publish(result, -1); err != nil {
-			log.Printf("Stream out failed: +%v", err)
+			slog.Error(
+				"stream out failed",
+				slog.Any("error", err),
+			)
 			return err
 		}
 
@@ -87,7 +90,11 @@ func (strm *MemoStream[IDX, IV, OV, KEY]) convert(inData Sequence[IDX, IV], outC
 
 		return nil
 	case errors.Is(err, ErrHistorySequence):
-		log.Printf("History sequence[%v] arrived: %+v", inData.Index(), inData.Value())
+		slog.Error(
+			"history sequence arrived",
+			slog.Any("idx", inData.Index()),
+			slog.Any("value", inData.Value()),
+		)
 
 		return nil
 	default:
@@ -105,7 +112,7 @@ func (strm *MemoStream[IDX, IV, OV, KEY]) Name() string {
 
 func (strm *MemoStream[IDX, IV, OV, KEY]) Init(ctx context.Context, name string, extraInit func()) {
 	strm.initOnce.Do(func() {
-		log.Print("MemoStream Init")
+		slog.Debug("memo stream init")
 		if ctx == nil {
 			ctx = context.Background()
 		}

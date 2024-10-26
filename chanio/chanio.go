@@ -2,7 +2,7 @@ package chanio
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"reflect"
 	"runtime"
 	"sync"
@@ -36,7 +36,11 @@ func RegisterType(t PersistentData, newFn func() PersistentData) (tid TID) {
 		typeList = append(typeList, sync.Pool{New: func() any { return newFn() }})
 		tid = TID(len(typeList) - 1)
 		typeCache[typ] = tid
-		log.Printf("Type[%s] registered with TID[%d]", typ, tid)
+		slog.Info(
+			"type registered",
+			slog.String("type", typ.String()),
+			slog.Int("tid", int(tid)),
+		)
 	}
 
 	return
